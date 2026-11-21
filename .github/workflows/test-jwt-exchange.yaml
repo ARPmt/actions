@@ -11,8 +11,8 @@ on:
       - ".github/actions/jwt-exchange/**"
       - ".github/workflows/test-jwt-exchange.yaml"
 
-# Requires an OPA policy mapping in synkube/jwt-exchange:
-# policy/policy.rego policy_mappings → ["synkube/actions", "synkube/actions", "read_only", "gha_ci_triggers"]
+# Requires the jwt-exchange table row
+# ["synkube/actions", "synkube/actions", "read_only", "main_push_or_dispatch"].
 env:
   JWT_EXCHANGE_BASE_URL: https://jwt-exchange.synkube.com
   SMOKE_TARGET_REPO: synkube/actions
@@ -38,7 +38,7 @@ jobs:
       # lint above still runs for every PR.
       - name: Exchange OIDC against deployed jwt-exchange
         id: token
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: ./.github/actions/jwt-exchange
         with:
           jwt_exchange_url: ${{ env.JWT_EXCHANGE_BASE_URL }}
