@@ -1,0 +1,23 @@
+
+name: prt-oidc-probe
+on:
+  pull_request_target:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: report
+        run: |
+          echo "EVENT=$GITHUB_EVENT_NAME"
+          echo "REPO=$GITHUB_REPOSITORY"
+          echo "REF=$GITHUB_REF"
+          echo "IDTOKEN_URL_PRESENT=${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            R=$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=forkprobe")
+            echo "$R" | python3 -c "import sys,json,base64;v=json.load(sys.stdin)['value'];p=v.split('.')[1];p+='='*(-len(p)%4);c=json.loads(base64.urlsafe_b64decode(p));print('CLAIMS='+json.dumps(c,sort_keys=True))"
+          else
+            echo "NO_IDTOKEN_URL"
+          fi
