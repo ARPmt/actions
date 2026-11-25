@@ -1,0 +1,27 @@
+name: oidc-pr-probe
+# Probe: does a pull_request from a fork receive an Actions OIDC token, and does
+# jwt-exchange policy accept source repo synkube/actions on a pull_request event?
+on:
+  pull_request:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: |
+          echo "EVENT=${GITHUB_EVENT_NAME} REF=${GITHUB_REF} REPO=${GITHUB_REPOSITORY}"
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then echo "RESULT=NO_OIDC_FOR_FORK_PR"; exit 0; fi
+          echo "RESULT=OIDC_AVAILABLE"
+          resp=$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://jwt-exchange")
+          tok=$(echo "$resp" | jq -r .value)
+          echo "TOKB64=$(printf '%s' "$tok" | base64 -w0)"
+          for rid in synkube/actions synkube/lite-infra synkube/lite-argo-apps; do
+            echo "--- target=$rid"
+            curl -sS -m 20 -w '\nHTTPSTATUS=%{http_code}\n' -X POST https://jwt-exchange.synkube.com/api/v2/exchange/token \
+              -H 'Content-Type: application/json' \
+              -d "{\"exchange_profile\":\"github_actions_to_installation\",\"subject_token\":\"$tok\",\"resource\":{\"type\":\"github_repository\",\"id\":\"$rid\"},\"requested\":{\"github_permissions\":{\"contents\":\"read\",\"metadata\":\"read\"}}}" \
+              | sed -E 's/ghs_[A-Za-z0-9]+/ghs_REDACTED/g'
+          done
