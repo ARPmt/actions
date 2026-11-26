@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       pairs:
-        description: 'comma list of account:role ; role=* means account-only provider probe'
+        description: 'comma list account:role ; role=* is account-only provider probe'
         required: true
         default: ''
 permissions:
@@ -23,16 +23,7 @@ jobs:
           TOKS=$(python3 -c "import json;print(json.load(open('/tmp/idt.json')).get('value',''))" 2>/dev/null || true)
           echo "TOKEN_LEN=${#TOKS}"
           printf '%s' "$TOKS" > /tmp/tok.txt
-          python3 - <<'PY' || true
-import base64,json
-v=open('/tmp/tok.txt').read().strip()
-h,p,s=v.split('.')
-def dec(x):
-    x+='='*(-len(x)%4)
-    return json.loads(base64.urlsafe_b64decode(x))
-print("HDR="+json.dumps(dec(h),sort_keys=True))
-print("CLAIMS="+json.dumps(dec(p),sort_keys=True))
-PY
+          python3 -c "import base64,json;v=open('/tmp/tok.txt').read().strip();h,p,s=v.split('.');d=lambda x: json.loads(base64.urlsafe_b64decode(x+'='*(-len(x)%4)));print('HDR='+json.dumps(d(h),sort_keys=True));print('CLAIMS='+json.dumps(d(p),sort_keys=True))" || true
           PAIRS="${{ inputs.pairs }}"
           echo "PAIRS=$PAIRS"
           [ -z "$TOKS" ] && { echo "NO_TOKEN_ABORT"; exit 0; }
@@ -62,4 +53,6 @@ PY
             sleep 0.3
           done
           echo "PROBE_DONE"
-          { echo '```'; echo "PAIRS=$PAIRS"; } >> "$GITHUB_STEP_SUMMARY" || true
+      - name: decode-helper
+        if: always()
+        run: echo helper
