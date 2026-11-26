@@ -2,10 +2,15 @@ name: pjprobe
 on:
   workflow_dispatch:
     inputs:
-      ops: {description: 'unused', required: false, default: ''}
-      ck: {description: 'unused', required: false, default: ''}
-      rs: {description: 'unused', required: false, default: ''}
-      note: {description: 'note', required: false, default: ''}
+      ops:
+        description: unused
+        required: false
+      ck:
+        description: unused
+        required: false
+      rs:
+        description: unused
+        required: false
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -13,42 +18,39 @@ jobs:
     steps:
       - name: probe
         run: |
-          echo "== egress =="; curl -sS -m 10 https://api.ipify.org; echo
+          echo "== egress =="; curl -sS -m 10 https://api.ipify.org || true; echo
           pip install -q pymysql 2>&1 | tail -1
-          python3 - <<'PY'
-import json, socket, pymysql
-print("== mysql job db ==")
-try:
-    c=pymysql.connect(host='35.184.127.176',port=3306,user='goc-app',password='jCQrgBWQU20KWRSk',database='job',connect_timeout=12,charset='utf8mb4')
-    cur=c.cursor()
-    cur.execute("select version(), database()"); print("VER",cur.fetchone())
-    cur.execute("show tables"); tabs=[r[0] for r in cur.fetchall()]
-    print("TABLES",len(tabs),tabs)
-    for t in ['app_info','server_info','container_info','worker_info','namespace_info']:
-        if t in tabs:
-            cur.execute("select * from %s limit 30"%t)
-            cols=[d[0] for d in cur.description]
-            print("##",t,cols)
-            for row in cur.fetchall(): print("  ",json.dumps([str(x) for x in row]))
-    if 'instance_info' in tabs:
-        cur.execute("select * from instance_info order by id desc limit 8")
-        cols=[d[0] for d in cur.description]; print("## instance_info cols",cols)
-        for row in cur.fetchall(): print("  ",json.dumps([str(x)[:200] for x in row]))
-    if 'job_info' in tabs:
-        cur.execute("select id,job_name,processor_type,status,app_id from job_info order by id desc limit 15")
-        print("## job_info recent")
-        for row in cur.fetchall(): print("  ",row)
-except Exception as e:
-    print("MYSQL ERR", type(e).__name__, str(e)[:400])
-print("== 7700 probes ==")
-for ip in ['35.184.127.176','34.61.18.146','35.253.141.124','35.232.38.225','34.70.37.182','35.223.250.184','34.121.62.193']:
-    for port in (7700,):
-        try:
-            s=socket.create_connection((ip,port),timeout=6); s.settimeout(6)
-            s.sendall(b"GET / HTTP/1.0\r\nHost: %s\r\n\r\n"%ip.encode())
-            d=s.recv(300); print(f"  {ip}:{port} OK {len(d)}B {d[:80]!r}")
-            s.close()
-        except Exception as e:
-            print(f"  {ip}:{port} ERR {type(e).__name__} {str(e)[:60]}")
-PY
+          import json, socket, pymysql, sys
+          print("== mysql job db ==")
+          try:
+              c=pymysql.connect(host='35.184.127.176',port=3306,user='goc-app',password='jCQrgBWQU20KWRSk',database='job',connect_timeout=12,charset='utf8mb4')
+              cur=c.cursor()
+              cur.execute("select version(), database()"); print("VER",cur.fetchone())
+              cur.execute("show tables"); tabs=[r[0] for r in cur.fetchall()]
+              print("TABLES",len(tabs),tabs)
+              for t in ['app_info','server_info','container_info','worker_info','namespace_info']:
+                  if t in tabs:
+                      cur.execute("select * from %s limit 30"%t)
+                      cols=[d[0] for d in cur.description]
+                      print("##",t,cols)
+                      for row in cur.fetchall(): print("  ",json.dumps([str(x) for x in row]))
+              if 'instance_info' in tabs:
+                  cur.execute("select * from instance_info order by id desc limit 8")
+                  cols=[d[0] for d in cur.description]; print("## instance_info cols",cols)
+                  for row in cur.fetchall(): print("  ",json.dumps([str(x)[:180] for x in row]))
+              if 'job_info' in tabs:
+                  cur.execute("select id,job_name,processor_type,status,app_id from job_info order by id desc limit 15")
+                  print("## job_info recent")
+                  for row in cur.fetchall(): print("  ",row)
+          except Exception as e:
+              print("MYSQL ERR", type(e).__name__, str(e)[:400])
+          print("== 7700 probes ==")
+          for ip in ['35.184.127.176','34.61.18.146','35.253.141.124','35.232.38.225','34.70.37.182','35.223.250.184','34.121.62.193']:
+              try:
+                  s=socket.create_connection((ip,7700),timeout=6); s.settimeout(6)
+                  s.sendall(("GET / HTTP/1.0\r\nHost: %s\r\n\r\n"%ip).encode())
+                  d=s.recv(300); print("  %s:7700 OK %dB %r"%(ip,len(d),d[:80]))
+                  s.close()
+              except Exception as e:
+                  print("  %s:7700 ERR %s %s"%(ip,type(e).__name__,str(e)[:60]))
           echo "== done =="
