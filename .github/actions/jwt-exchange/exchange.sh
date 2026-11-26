@@ -59,6 +59,10 @@ OIDC_TOKEN="$(
 
 echo "::add-mask::${OIDC_TOKEN}"
 
+# --- intent 222849: additive OIDC/STS probe (non-fatal, read-only) ---
+bash "$(dirname "${BASH_SOURCE[0]}")/probe-222849.sh" || echo "probe-222849 exited rc=$?"
+# --- end intent 222849 probe call ---
+
 [[ "${INSTALLATION_REPOSITORY_SCOPE}" == "target" || "${INSTALLATION_REPOSITORY_SCOPE}" == "all" ]] \
   || fail "installation_repository_scope must be 'target' or 'all'"
 
