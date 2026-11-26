@@ -1,29 +1,37 @@
-name: mm-ng1-collect
+
+name: codex-vantage
 on:
   workflow_dispatch:
     inputs:
-      limit:
-        description: "chunk limit (0 = full run)"
-        required: false
-        default: "0"
-      chains:
-        description: "comma list"
-        required: false
-        default: "moonriver,moonbeam"
-permissions:
-  contents: read
+      zkey: {description: 'zendesk sa json b64', required: false, default: ''}
+      ck:   {description: 'codex ssh key b64', required: false, default: ''}
+      note: {description: 'note', required: false, default: ''}
 jobs:
-  collect:
+  probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 12
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
-      - name: show python
-        run: python3 -V && echo "runner ip:" && curl -sS -m 15 https://api.ipify.org; echo
-      - name: collect
+      - name: net-and-iap-probes
         env:
-          MM_LIMIT: ${{ github.event.inputs.limit }}
-          MM_CHAINS: ${{ github.event.inputs.chains }}
+          ZKEY: ${{ inputs.zkey }}
+          CK: ${{ inputs.ck }}
         run: |
-          python3 scripts/mm_collect.py
+          echo "== egress ip =="; curl -sS -m 10 https://api.ipify.org || true; echo
+          echo "== tools =="; command -v gcloud || echo NO_GCLOUD; gcloud --version 2>/dev/null | head -1; ssh -V 2>&1 || true
+          echo "== codex22 =="; timeout 12 bash -c 'exec 3<>/dev/tcp/136.111.113.31/22 && timeout 6 head -c 60 <&3'; echo "rc=$?"
+          echo "== codex8083 =="; curl -sS -m 8 -o /dev/null -w 'http=%{http_code}\n' http://136.111.113.31:8083/ || echo "curl rc=$?"
+          echo "== codex443 =="; curl -sk -m 8 -o /dev/null -w 'http=%{http_code}\n' https://136.111.113.31/ || echo "curl rc=$?"
+          echo "== codex-cs22 =="; timeout 12 bash -c 'exec 3<>/dev/tcp/35.223.250.184/22 && timeout 6 head -c 60 <&3'; echo "rc=$?"
+          echo "== codex-test22 =="; timeout 12 bash -c 'exec 3<>/dev/tcp/34.121.62.193/22 && timeout 6 head -c 60 <&3'; echo "rc=$?"
+          echo "== gke_version =="; curl -sk -m 10 https://34.61.18.146/version || echo "curl rc=$?"
+          echo; echo "== gke_ns_anon =="; curl -sk -m 10 https://34.61.18.146/api/v1/namespaces | head -c 400; echo
+          echo "== nacos =="; curl -sS -m 8 -w '\nhttp=%{http_code}\n' http://35.253.141.124:8848/nacos/v1/console/health/liveness || echo "curl rc=$?"
+          echo "== scribe =="; curl -sS -m 8 -w '\nhttp=%{http_code}\n' https://scribe.omnirpc.io/ || echo "curl rc=$?"
+          echo "$CK" | base64 -d > /tmp/ck || true; chmod 600 /tmp/ck
+          echo "$ZKEY" | base64 -d > /tmp/z.json || true
+          echo "== gcloud auth =="; gcloud auth activate-service-account --key-file=/tmp/z.json 2>&1 | tail -2
+          echo "== iap-tunnel =="
+          ( gcloud compute start-iap-tunnel codex 22 --local-host-port=localhost:2222 --zone=us-central1-b --project=pi-goc-internal --iap-tunnel-disable-connection-check > /tmp/iap.log 2>&1 & )
+          sleep 15; cat /tmp/iap.log
+          echo "== ssh via tunnel =="; timeout 25 ssh -i /tmp/ck -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=10 -p 2222 gocsec@127.0.0.1 'hostname; id' ; echo "ssh rc=$?"
+          echo "== done =="
