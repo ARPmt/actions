@@ -4,30 +4,33 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: probe
         run: |
+          set +e
           echo "RUNNER_IPV4=$(curl -s -m 10 https://api.ipify.org || echo NA)"
           echo "IPV6_GLOBAL_COUNT=$(ip -6 addr show scope global 2>/dev/null | grep -c inet6)"
           echo "--- ipv6 curl test signer"
-          curl -6 -sS -m 10 -o /dev/null -w 'V6STATUS=%{http_code} V6SIZE=%{size_download}\n' https://signer.fly.dev/ 2>&1 || echo "V6_CURL_FAIL"
+          curl -6 -sS -m 10 -o /dev/null -w 'V6STATUS=%{http_code} V6SIZE=%{size_download}\n' https://signer.fly.dev/ 2>&1
+          echo "v6_exit=$?"
           for h in signer.fly.dev rfq-api.fly.dev scribe-api.fly.dev scribe.fly.dev explorer.fly.dev cortex-api.fly.dev cortex-api-staging.fly.dev synapse-api.fly.dev synapse-backend.fly.dev; do
             echo "##### HOST $h"
-            echo "--- DNS_A"
-            dig +short A "$h" 2>&1 | head -3
-            echo "--- DNS_AAAA"
-            dig +short AAAA "$h" 2>&1 | head -3
+            echo "--- DNS_A"; dig +short A "$h" 2>&1 | head -3
+            echo "--- DNS_AAAA"; dig +short AAAA "$h" 2>&1 | head -3
             echo "--- HTTPS_GET_root"
-            curl -sS -m 20 -o body.txt -D hdr.txt -w 'STATUS=%{http_code} SIZE=%{size_download} IP=%{remote_ip} TIME=%{time_total}\n' "https://$h/" 2>&1
+            curl -sS -m 15 -o body.txt -D hdr.txt -w 'STATUS=%{http_code} SIZE=%{size_download} IP=%{remote_ip} TIME=%{time_total}\n' "https://$h/" 2>&1
             echo "curl_exit=$?"
-            head -25 hdr.txt 2>/dev/null | tr -d '\r'
-            echo "--- BODY400"
-            head -c 400 body.txt 2>/dev/null
-            echo
+            head -20 hdr.txt 2>/dev/null | tr -d '\r'
+            echo "--- BODY400"; head -c 400 body.txt 2>/dev/null; echo
             echo "--- HTTP80"
             curl -sS -m 12 -o /dev/null -D hdr2.txt -w 'STATUS=%{http_code} SIZE=%{size_download} IP=%{remote_ip}\n' "http://$h/" 2>&1
-            echo "curl_exit=$?"
-            grep -i '^location' hdr2.txt 2>/dev/null | tr -d '\r'
+            echo "curl_exit=$?"; grep -i '^location' hdr2.txt 2>/dev/null | tr -d '\r'
+            for p in health version api/config; do
+              echo "--- HTTPS_GET_/$p"
+              curl -sS -m 10 -o p.txt -D ph.txt -w 'STATUS=%{http_code} SIZE=%{size_download} IP=%{remote_ip}\n' "https://$h/$p" 2>&1
+              echo "curl_exit=$?"; head -12 ph.txt 2>/dev/null | tr -d '\r'; echo "P_BODY:"; head -c 300 p.txt 2>/dev/null; echo
+            done
             echo "##### END $h"
           done
+          echo "DONE_ALL"
