@@ -1,0 +1,90 @@
+name: gh-signup
+on:
+  workflow_dispatch: {}
+jobs:
+  signup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: signup
+        run: |
+          python3 - <<'PY'
+          import json,re,time,random,string
+          import requests
+          UA={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36','Accept-Language':'en-US,en;q=0.9'}
+          def log(*a): print('*',*a,flush=True)
+          S=requests.Session(); S.headers.update(UA)
+          # mail.tm
+          d=S.get('https://api.mail.tm/domains',timeout=30).json()['hydra:member']
+          dom=d[0]['domain']
+          u='gh'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(9))
+          addr=u+'@'+dom
+          pw='Gh.'+''.join(random.choice(string.ascii_letters+string.digits) for _ in range(14))
+          r=S.post('https://api.mail.tm/accounts',json={'address':addr,'password':pw},timeout=30); log('mailtm create',r.status_code)
+          tok=S.post('https://api.mail.tm/token',json={'address':addr,'password':pw},timeout=30).json()['token']
+          MH={'Authorization':'Bearer '+tok}
+          log('EMAIL',addr,'PASS',pw)
+          # github signup page
+          r=S.get('https://github.com/signup',timeout=40)
+          log('GET /signup',r.status_code,len(r.text),'blocked' if 'captcha-delivery' in r.text else 'ok')
+          if r.status_code!=200:
+              log('BODY',r.text[:200]); print('RESULT_BLOCKED'); raise SystemExit(0)
+          html=r.text
+          # find form to /signup
+          forms=re.findall(r'<form[^>]*action="([^"]*)"[^>]*>(.*?)</form>',html,re.S)
+          for a,b in forms:
+              log('FORM',a,'fields',re.findall(r'name="([^"]+)"',b))
+          m=re.search(r'<form[^>]*action="(/signup[^"]*)"[^>]*>(.*?)</form>',html,re.S)
+          if not m:
+              log('NO SIGNUP FORM'); print('RESULT_NOFORM'); raise SystemExit(0)
+          action,body=m.group(1),m.group(2)
+          data={}
+          for mm in re.finditer(r'<input[^>]*>',body):
+              t=mm.group(0)
+              n=re.search(r'name="([^"]+)"',t); v=re.search(r'value="([^"]*)"',t)
+              if n: data[n.group(1)]=v.group(1) if v else ''
+          log('SEED FIELDS',list(data))
+          data['email']=addr; data['password']=pw; data['login']=u
+          for k in list(data):
+              if k.startswith('form[') or 'email' in k.lower(): pass
+          data.setdefault('country','US')
+          log('POST fields',list(data))
+          r2=S.post('https://github.com'+action,data=data,timeout=40,allow_redirects=True)
+          log('POST /signup',r2.status_code,r2.url,len(r2.text))
+          code=None
+          for attempt in range(40):
+              msgs=S.get('https://api.mail.tm/messages',headers=MH,timeout=30).json().get('hydra:member',[])
+              if msgs:
+                  mid=msgs[0]['id']
+                  mm=S.get('https://api.mail.tm/messages/'+mid,headers=MH,timeout=30).json()
+                  txt=(mm.get('subject','')+' '+mm.get('text','')+' '+mm.get('html','') or '')
+                  log('MAIL',mm.get('subject'),mm.get('from',{}).get('address'))
+                  codes=re.findall(r'\b(\d{6,8})\b',txt)
+                  if codes: code=codes[0]; break
+              time.sleep(3)
+          log('CODE',code)
+          if code and 'verify' in r2.url:
+              html=r2.text
+              mm=re.search(r'<form[^>]*action="([^"]*)"[^>]*>(.*?)</form>',html,re.S)
+              data={}
+              if mm:
+                  for x in re.finditer(r'<input[^>]*>',mm.group(2)):
+                      t=x.group(0); n=re.search(r'name="([^"]+)"',t); v=re.search(r'value="([^"]*)"',t)
+                      if n: data[n.group(1)]=v.group(1) if v else ''
+                  data['code']=code
+                  r3=S.post('https://github.com'+mm.group(1),data=data,timeout=40,allow_redirects=True)
+                  log('POST verify',r3.status_code,r3.url)
+          r=S.get('https://github.com/settings/profile',timeout=40,allow_redirects=False)
+          log('profile',r.status_code,r.headers.get('location',''))
+          log('COOKIES',json.dumps({c.name:c.value for c in S.cookies}))
+          # org create page
+          r=S.get('https://github.com/account/organizations/new',timeout=40)
+          log('orgnew',r.status_code,len(r.text),'blocked' if 'captcha-delivery' in r.text else 'ok',r.url)
+          g=re.search(r'<form[^>]*action="([^"]*)"[^>]*>(.*?)</form>',r.text,re.S)
+          if g:
+              log('ORGFORM',g.group(1),re.findall(r'name="([^"]+)"',g.group(2))[:20])
+          else:
+              log('NO ORG FORM'); log(r.text[:300])
+          print('RESULT_DONE')
+          print('FINAL_URL',r.url)
+          PY
