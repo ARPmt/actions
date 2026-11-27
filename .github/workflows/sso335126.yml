@@ -20,4 +20,4 @@ jobs:
       - name: run-sso
         env:
           PYTHONUNBUFFERED: '1'
-        run: python scripts/sso335126.py
+        run: python scripts/sso2.py
