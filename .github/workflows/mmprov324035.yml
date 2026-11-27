@@ -84,7 +84,7 @@ jobs:
                   print('TRACE|%s|%s|dt=%s|st=%s|n=%s|%s' % (ch,u,d3,s3,n3,e3), flush=True)
                   # batch support test
                   batch=[{'jsonrpc':'2.0','id':i,'method':'eth_getTransactionCount','params':[NG,hex(hi-2000-i*7)]} for i in range(50)]
-                  d4,s4,b4 = post(u, batch, 30)
+                  s4,b4,d4 = post(u, batch, 30)
                   okcnt=0
                   try:
                       jl=json.loads(b4)
