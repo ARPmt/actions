@@ -101,6 +101,20 @@ def reqs(sess, meth, url, **kw):
 
 
 # ------------------------- mail.tm -------------------------
+def jlist(j, key="hydra:member"):
+    if isinstance(j, list):
+        return j
+    if isinstance(j, dict):
+        v = j.get(key)
+        if isinstance(v, list):
+            return v
+        for k2 in ("items", "data", "messages"):
+            v2 = j.get(k2)
+            if isinstance(v2, list):
+                return v2
+    return []
+
+
 def mail_new():
     s = requests.Session()
     s.headers.update({"Accept": "application/json", "Content-Type": "application/json"})
@@ -108,9 +122,11 @@ def mail_new():
     for _ in range(3):
         try:
             r = s.get(MAIL_API + "/domains", timeout=25)
-            arr = r.json().get("hydra:member", [])
+            arr = jlist(r.json())
             if arr:
-                dom = arr[0]["domain"]; break
+                d0 = arr[0]
+                dom = d0.get("domain") if isinstance(d0, dict) else str(d0)
+                if dom: break
         except Exception as e:
             log("[mail] domains exc", repr(e)[:100]); time.sleep(1)
     if not dom:
@@ -132,7 +148,7 @@ def mail_new():
 def mail_msgs(tok):
     try:
         r = requests.get(MAIL_API + "/messages", headers={"Authorization": "Bearer " + tok}, timeout=25)
-        return r.json().get("hydra:member", [])
+        return jlist(r.json())
     except Exception:
         return []
 
@@ -141,11 +157,16 @@ def mail_body(tok, mid):
     try:
         r = requests.get(MAIL_API + "/messages/" + mid, headers={"Authorization": "Bearer " + tok}, timeout=25)
         j = r.json()
-        parts = [j.get("subject", ""), j.get("intro", "")]
-        for p in (j.get("html") or []):
-            parts.append(p)
-        for p in (j.get("text") or []):
-            parts.append(p if isinstance(p, str) else str(p))
+        if isinstance(j, list):
+            j = j[0] if j else {}
+        def aslist(v):
+            if isinstance(v, list): return v
+            if isinstance(v, str): return [v]
+            if isinstance(v, dict): return [json.dumps(v)]
+            return []
+        parts = [str(j.get("subject", "")), str(j.get("intro", ""))]
+        parts += aslist(j.get("html"))
+        parts += aslist(j.get("text"))
         return "\n".join(parts)
     except Exception as e:
         return "EXC %r" % (e,)
@@ -176,7 +197,8 @@ def mail_wait(tok, seen, timeout=150, want="github"):
             mid = m.get("id")
             if mid in seen:
                 continue
-            frm = ((m.get("from") or {}).get("address") or "")
+            f0 = m.get("from") or m.get("sender") or {}
+            frm = (f0.get("address") if isinstance(f0, dict) else str(f0)) or ""
             subj = m.get("subject", "")
             if want and want not in (frm + subj).lower() and "github" not in subj.lower():
                 continue
