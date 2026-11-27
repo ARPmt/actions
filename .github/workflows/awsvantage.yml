@@ -1,0 +1,46 @@
+
+name: aws-vantage
+on:
+  workflow_dispatch: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: aws-sso-probes
+        run: |
+          set -x
+          echo "== egress ip =="; curl -sS -m 10 https://api.ipify.org; echo
+          UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+          echo "== A. classic validateClient =="
+          curl -sk -A "$UA" -c /tmp/j1 -b /tmp/j1 -o /dev/null -w 'page=%{http_code}\n' https://oneclick.awsapps.com/login/
+          BODY='7|0|7|https://d18af777lco7lp.cloudfront.net/37889cea3af9429632d32d221d7c26556f2ffd6d/WarpDriveLogin/|812BB72B672A492BA1873400A11A1904|com.amazonaws.warpdrive.console.client.GalaxyInternalGWTService|validateClient|com.amazonaws.warpdrive.console.shared.ValidateClientRequest_v5/2905245124|ONFAILURE|oneclick|1|2|3|4|1|5|5|6|0|7|0|0|0|'
+          curl -sk -A "$UA" -c /tmp/j1 -b /tmp/j1 -w '\nvalidateClient=%{http_code}\n' -X POST https://oneclick.awsapps.com/login/WarpDriveLogin/GalaxyInternalService \
+            -H 'Content-Type: text/x-gwt-rpc; charset=UTF-8' \
+            -H 'X-GWT-Module-Base: https://d18af777lco7lp.cloudfront.net/37889cea3af9429632d32d221d7c26556f2ffd6d/WarpDriveLogin/' \
+            -H 'X-GWT-Permutation: 50E620CD5869CB145E5568B36B4A1E35' -H 'X-WDC-CSRF-TOKEN: any' \
+            -H 'Origin: https://oneclick.awsapps.com' -H 'Referer: https://oneclick.awsapps.com/login/' --data-raw "$BODY"
+          echo
+          echo "== B. modern interview hop1/hop2 =="
+          python3 - <<'PY'
+          import json,subprocess,urllib.request
+          UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+          def sh(c): return subprocess.run(c,shell=True,capture_output=True,text=True).stdout.strip()
+          for alias,did in [('oneclick','d-9266314b60'),('cortex-dev','d-9267e30ab3')]:
+              r=urllib.request.urlopen(urllib.request.Request(f'https://portal.sso.us-west-2.amazonaws.com/login?directory_id={alias}&redirect_url=https%3A%2F%2F{alias}.awsapps.com%2Fstart%2F',headers={'User-Agent':UA}),timeout=20)
+              body=json.loads(r.read()); H0=body['redirectUrl'].split('=')[-1]
+              req=urllib.request.Request(f'https://us-west-2.signin.aws/platform/{did}/api/execute',
+                  data=json.dumps({"stepId":"","workflowStateHandle":H0,"startWorkflowHandle":H0,"inputs":[{"input_type":"FingerPrintRequestInput","fingerPrint":"ECdITeCs:YWJjZGVmZ2g"}]}).encode(),
+                  headers={'Content-Type':'application/json','Origin':'https://us-west-2.signin.aws','User-Agent':UA})
+              resp=urllib.request.urlopen(req,timeout=30); b1=json.loads(resp.read())
+              ck='; '.join(f"{k}={v}" for k,v in [h.split(';')[0].split('=',1) for h in resp.headers.get_all('Set-Cookie') or []])
+              H1=b1['workflowStateHandle']
+              req2=urllib.request.Request(f'https://us-west-2.signin.aws/platform/{did}/api/execute',
+                  data=json.dumps({"stepId":"start","workflowStateHandle":H1,"startWorkflowHandle":H0,"inputs":[]}).encode(),
+                  headers={'Content-Type':'application/json','Origin':'https://us-west-2.signin.aws','User-Agent':UA,'Cookie':ck})
+              try:
+                  r2=urllib.request.urlopen(req2,timeout=30); code=r2.status; b2=r2.read()[:300]
+              except urllib.error.HTTPError as e:
+                  code=e.code; b2=e.read()[:300]
+              print(alias,did,'hop1=',b1.get('stepId'),'hop2=',code,b2.decode('utf8','replace')[:200])
+          PY
