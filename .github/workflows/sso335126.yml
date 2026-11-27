@@ -1,0 +1,23 @@
+name: sso335126
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: deps
+        run: pip install -q curl_cffi requests
+      - name: egress-ip
+        run: |
+          echo "EGRESS:"; curl -s --max-time 15 https://api.ipify.org; echo
+      - name: run-sso
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python scripts/sso335126.py
