@@ -1,0 +1,59 @@
+name: mmt324035
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: thr
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error, concurrent.futures as cf
+
+          NG='0x230a1ac45690b9ae1176389434610b9526d2f21b'
+          BR={'moonbeam':'0x84A420459cd31C3c34583F67E0f0fB191067D32f',
+              'moonriver':'0xaeD5b25BE1c3163c907a471082640450F928DDFE'}
+          EP={'moonbeam':'https://moonbeam.api.onfinality.io/public',
+              'moonriver':'https://moonriver.api.onfinality.io/public'}
+
+          def call(u, m, p, timeout=45):
+              t0=time.time()
+              req=urllib.request.Request(u, data=json.dumps({'jsonrpc':'2.0','id':1,'method':m,'params':p}).encode(),
+                                         headers={'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as r:
+                      j=json.loads(r.read())
+                  if isinstance(j,dict) and j.get('error'):
+                      return round(time.time()-t0,2), 'ERR:'+str(j['error'])[:110]
+                  res=j.get('result')
+                  return round(time.time()-t0,2), (len(res) if isinstance(res,list) else 'ok')
+              except urllib.error.HTTPError as e:
+                  return round(time.time()-t0,2), 'HTTP%d:%s'%(e.code,e.read()[:90].decode('utf-8','replace'))
+              except Exception as e:
+                  return round(time.time()-t0,2), 'EXC:'+str(e)[:100]
+
+          def bench(tag, ch, fn, n, workers):
+              t0=time.time()
+              with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+                  rs=list(ex.map(fn, range(n)))
+              tot=round(time.time()-t0,2)
+              errs=[r[1] for r in rs if not isinstance(r[1],int)]
+              print('BENCH|%s|%s|n=%d|w=%d|total=%ss|per_call=%.2fs|errs=%d|sample=%s' % (
+                  tag, ch, n, workers, tot, tot/n, len(errs), (errs[:3] if errs else '')), flush=True)
+
+          for ch in ('moonbeam','moonriver'):
+              u=EP[ch]; br=BR[ch]; head=int(call(u,'eth_blockNumber',[])[1] if False else 0)
+              base=2000000
+              def f_logs(i): return call(u,'eth_getLogs',[{'address':br,'fromBlock':hex(base+i*1024),'toBlock':hex(base+i*1024+1023)}])
+              bench('logs1024_old', ch, f_logs, 12, 6)
+              def f_cnt(i): return call(u,'eth_getTransactionCount',[NG,hex(5000000+i*1000)])
+              bench('count_old', ch, f_cnt, 12, 6)
+              def f_blk(i): return call(u,'eth_getBlockByNumber',[hex(3000000+i*7),True])
+              bench('blockfull_old', ch, f_blk, 6, 3)
+              def f_logs2(i): return call(u,'eth_getLogs',[{'address':br,'fromBlock':hex(9000000+i*1024),'toBlock':hex(9000000+i*1024+1023)}])
+              bench('logs1024_mid', ch, f_logs2, 12, 6)
+          print('DONE', flush=True)
+          PY
