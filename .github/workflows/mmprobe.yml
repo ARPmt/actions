@@ -1,29 +1,475 @@
-name: mm-ng1-collect
+name: mmprobe
 on:
   workflow_dispatch:
-    inputs:
-      limit:
-        description: "chunk limit (0 = full run)"
-        required: false
-        default: "0"
-      chains:
-        description: "comma list"
-        required: false
-        default: "moonriver,moonbeam"
-permissions:
-  contents: read
 jobs:
-  collect:
+  movr:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 50
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
-      - name: show python
-        run: python3 -V && echo "runner ip:" && curl -sS -m 15 https://api.ipify.org; echo
+      - name: pip
+        run: python3 -m pip install --quiet requests
       - name: collect
         env:
-          MM_LIMIT: ${{ github.event.inputs.limit }}
-          MM_CHAINS: ${{ github.event.inputs.chains }}
+          FRONTIER_JSON: '[[904512,964283,1,219],[964283,1024054,219,662],[1024054,1083825,662,788],[1083825,1143596,788,882],[1143596,1203367,882,999],[1203367,1263138,999,1279],[1263138,1322909,1279,1910],[1322909,1382681,1910,2326],[1382681,1442452,2326,2628],[1442452,1502223,2628,2903],[1502223,1561994,2903,3081],[1561994,1621766,3081,3197],[1621766,1681537,3197,3414],[1681537,1741308,3414,3518],[1741308,1801079,3518,3583],[1801079,1860851,3583,3620],[1860851,1920622,3620,3666],[1920622,1980393,3666,3689],[1980393,2040164,3689,3745],[2040164,2099936,3745,3832],[2099936,2159707,3832,3957],[2159707,2219478,3957,3994],[2219478,2279249,3994,4025],[2279249,2339021,4025,4104],[2339021,2398792,4104,4165],[2398792,2458563,4165,4213],[2458563,2518334,4213,4233],[2518334,2578106,4233,4256],[2578106,2637877,4256,4283],[2637877,2697648,4283,4293],[2697648,2757419,4293,4306],[2757419,2817191,4306,4325],[2817191,2876962,4325,4336],[2876962,2936733,4336,4344],[2936733,2996504,4344,4350],[2996504,3056276,4350,4373],[3056276,3116047,4373,4387],[3116047,3175818,4387,4401],[3175818,3235589,4401,4410],[3235589,3295361,4410,4419],[3295361,3355132,4419,4426],[3355132,3414903,4426,4434],[3414903,3474674,4434,4438],[3474674,3534446,4438,4450],[3534446,3594217,4450,4454],[3594217,3653988,4454,4465],[3653988,3713759,4465,4476],[3713759,3773531,4476,4488],[3773531,3833302,4488,4500],[3833302,3893073,4500,4519],[3893073,3900544,4519,4520],[3900544,3908015,4520,4521],[3915486,3922958,4521,4522],[3922958,3930429,4522,4525],[3937901,3945372,4525,4526],[3952844,3960315,4526,4527],[3967786,3975257,4527,4529],[3975257,3982729,4529,4531],[3982729,3990200,4531,4534],[3990200,3997672,4534,4536],[3997672,4005143,4536,4538],[4005143,4012615,4538,4539],[4012615,4020086,4539,4540],[4020086,4027557,4540,4542],[4027557,4035028,4542,4546],[4035028,4042500,4546,4549],[4042500,4049971,4549,4550],[4049971,4057443,4550,4551],[4057443,4064914,4551,4553],[4064914,4072386,4553,4555],[4072386,4079857,4555,4557],[4094799,4102271,4557,4558],[4102271,4109742,4558,4559],[4109742,4117214,4559,4561],[4117214,4124685,4561,4563],[4124685,4132157,4563,4564],[4132157,4139628,4564,4565],[4147099,4154570,4565,4566],[4162042,4169513,4566,4568],[4169513,4176985,4568,4570],[4176985,4184456,4570,4571],[4184456,4191928,4571,4572],[4191928,4199399,4572,4574],[4199399,4206871,4574,4575],[4206871,4214342,4575,4576],[4214342,4221814,4576,4577],[4221814,4229285,4577,4579],[4229285,4236757,4579,4581],[4236757,4244228,4581,4583],[4244228,4251700,4583,4584],[4251700,4259171,4584,4586],[4259171,4266642,4586,4587],[4266642,4274113,4587,4594],[4281585,4289056,4594,4597],[4289056,4296528,4597,4598],[4303999,4311471,4598,4601],[4311471,4318942,4601,4602],[4326413,4333884,4602,4603],[4341356,4348827,4603,4604],[4363770,4371242,4604,4605],[4378713,4386184,4605,4606],[4393655,4401127,4606,4607],[4408598,4416070,4607,4609],[4416070,4423541,4609,4610],[4431013,4438484,4610,4614],[4445956,4453427,4614,4618],[4460899,4468370,4618,4620],[4475842,4483313,4620,4623],[4483313,4490785,4623,4624],[4490785,4498256,4624,4626],[4498256,4505727,4626,4629],[4505727,4513198,4629,4630],[4513198,4520670,4630,4634],[4520670,4528141,4634,4638],[4528141,4535613,4638,4640],[4535613,4543084,4640,4643],[4550556,4558027,4643,4647],[4558027,4565498,4647,4648],[4565498,4572969,4648,4649],[4595384,4602855,4649,4650],[4610327,4617798,4650,4653],[4617798,4625269,4653,4659],[4625269,4632740,4659,4662],[4632740,4640212,4662,4664],[4655155,4662626,4664,4665],[4673833,4677569,4665,4667],[4681305,4685041,4667,4668],[4685041,4688776,4668,4669],[4703719,4707455,4669,4682],[4707455,4711191,4682,4694],[4711191,4714927,4694,4701],[4726134,4729870,4701,4702],[4729870,4733605,4702,4707],[4737341,4741076,4707,4714],[4741076,4744812,4714,4715],[4744812,4748547,4715,4716],[4793376,4797112,4716,4717],[4812054,4815790,4717,4718],[4823261,4826997,4718,4719],[4826997,4830733,4719,4720],[4838204,4841940,4720,4721],[4841940,4845676,4721,4722],[4868089,4871825,4722,4723],[4897975,4901711,4723,4724],[4901711,4905447,4724,4725],[4912918,4916654,4725,4726],[4916654,4920390,4726,4728],[4920390,4924126,4728,4730],[4927861,4931597,4730,4731],[5002575,5006311,4731,4732],[5053007,5054875,4732,4733],[5138928,5140796,4733,4734],[5157607,5159475,4734,4735],[5178154,5180021,4735,4736],[5185625,5187493,4736,4737],[5189361,5191229,4737,4738],[5191229,5193097,4738,4741],[5198700,5200568,4741,4742],[5209907,5211775,4742,4743],[5237925,5239792,4743,4744],[5239792,5241660,4744,4747],[5247264,5249132,4747,4748],[5286488,5288356,4748,4749],[5301431,5303299,4749,4750],[5305167,5307035,4750,4751],[5323846,5325714,4751,4752],[5338788,5340656,4752,4753],[5346259,5348127,4753,4754],[5372410,5374277,4754,4756],[5383617,5385485,4756,4757],[5391088,5392956,4757,4759],[5396692,5398560,4759,4760],[5404163,5406031,4760,4761],[5406031,5407899,4761,4762],[5407899,5409767,4762,4763],[5411635,5413503,4763,4765],[5413503,5415371,4765,4766],[5426578,5428446,4766,4767],[5428446,5430314,4767,4768],[5443389,5445257,4768,4769],[5447125,5448992,4769,4771],[5450860,5452728,4771,4772],[5484481,5486349,4772,4777],[5488217,5490085,4777,4778],[5495688,5497556,4778,4779],[5499424,5501292,4779,4781],[5501292,5503160,4781,4782],[5510631,5512499,4782,4783],[5519970,5521838,4783,4784],[5523705,5525573,4784,4785],[5527441,5529309,4785,4787],[5531177,5533045,4787,4788],[5536781,5540516,4788,4789],[5555459,5559195,4789,4790],[5574138,5577873,4790,4791],[5577873,5581609,4791,4792],[5581609,5585344,4792,4795],[5585344,5589080,4795,4796],[5589080,5592816,4796,4797],[5596552,5600287,4797,4798],[5607759,5611495,4798,4799],[5618966,5622702,4799,4800],[5648852,5652588,4800,4801],[5652588,5656324,4801,4802],[5667531,5671267,4802,4806],[5675002,5678738,4806,4807],[5689945,5693681,4807,4809],[5708623,5712359,4809,4811],[5712359,5716095,4811,4812],[5738509,5742245,4812,4813],[5783337,5787073,4813,4815],[5787073,5790809,4815,4819],[5790809,5794544,4819,4820],[5794544,5798280,4820,4827],[5798280,5802016,4827,4836],[5802016,5805752,4836,4844],[5805752,5809487,4844,4854],[5809487,5813223,4854,4856],[5813223,5816958,4856,4858],[5816958,5820694,4858,4859],[5820694,5824429,4859,4861],[5828165,5831901,4861,4863],[5831901,5835637,4863,4864],[5835637,5839372,4864,4865],[5839372,5843108,4865,4868],[5854315,5858051,4868,4870],[5858051,5861787,4870,4873],[5865523,5869258,4873,4874],[5869258,5872994,4874,4875],[5872994,5876730,4875,4876],[5876730,5880466,4876,4879],[5891673,5895409,4879,4880],[5895409,5899144,4880,4881],[5902880,5906616,4881,4882],[5910352,5914087,4882,4883],[5936501,5940237,4883,4884],[5940237,5943972,4884,4886],[5982264,5982731,4886,4888],[5982731,5983198,4888,4889],[5985066,5985532,4889,4890],[5985532,5985999,4890,4891],[5985999,5986466,4891,4892],[5987867,5988334,4892,4893],[5988334,5988801,4893,4895],[5993937,5994404,4895,4896],[6013550,6014017,4896,4897],[6028493,6028960,4897,4898],[6030360,6030827,4898,4899],[6035030,6035497,4899,4900],[6038766,6039233,4900,4901],[6050907,6051374,4901,4902],[6060712,6061179,4902,4903],[6069585,6070052,4903,4904],[6082193,6082660,4904,4905],[6087330,6087797,4905,4906],[6128423,6128890,4906,4907],[6144300,6144767,4907,4908],[6148503,6148970,4908,4909],[6155040,6155507,4909,4910],[6159243,6159710,4910,4911],[6186793,6187260,4911,4912],[6209674,6210141,4912,4913],[6216212,6216679,4913,4914],[6234890,6235357,4914,4915],[6250767,6251234,4915,4916],[6279719,6280186,4916,4917],[6304934,6305401,4917,4918],[6305868,6306335,4918,4919],[6319410,6319877,4919,4920],[6329216,6329683,4920,4922],[6333419,6333886,4922,4923],[6341358,6341825,4923,4924],[6390856,6391323,4924,4925],[6404398,6404865,4925,4926],[6429147,6429614,4926,4927],[6453896,6454363,4927,4928],[6487517,6487984,4928,4929],[6491253,6491720,4929,4930],[6505729,6506196,4930,4931],[6578108,6578575,4931,4934],[6640682,6641149,4934,4935],[6673835,6674302,4935,4936],[6695783,6696250,4936,4937],[6721465,6721932,4937,4938],[6737342,6737809,4938,4939],[6741545,6742012,4939,4940],[6745748,6746215,4940,4941],[6805052,6805519,4941,4942],[6883034,6883501,4942,4944],[6896109,6896576,4944,4945],[7491486,7492420,4945,4946],[7533513,7534447,4946,4947],[7632509,7633443,4947,4948],[7634377,7635311,4948,4949],[7843577,7844511,4949,4950],[7860387,7861321,4950,4951],[7889339,7890273,4951,4952],[7904282,7905216,4952,4953],[8053710,8054644,4953,4954],[8159243,8160177,4954,4955],[8160177,8161111,4955,4956],[8241429,8242362,4956,4957],[8250768,8251702,4957,4958],[8397394,8398328,4958,4959],[8501060,8501994,4959,4960],[8544021,8544955,4960,4961],[8572972,8573906,4961,4962],[8624338,8625272,4962,4963],[8655158,8656092,4963,4964],[8680374,8681308,4964,4965],[8711193,8712127,4965,4966],[8713995,8714929,4966,4967],[8723334,8724268,4967,4968],[8808079,8808080,4968,4969],[8811970,8811971,4969,4970],[8868183,8868184,4970,4971],[9006552,9006553,4971,4972],[9116200,9116201,4972,4973],[9153458,9153459,4973,4974],[9172947,9172948,4974,4975],[9172967,9172968,4975,4976],[9172984,9172985,4976,4977],[9188708,9188709,4977,4978],[9219494,9219495,4978,4979],[9261839,9261840,4979,4980],[9308405,9308406,4980,4981],[9353579,9353580,4981,4982],[9436933,9436934,4982,4983],[9659802,9659803,4983,4984],[9780704,9780705,4984,4985],[9810037,9810038,4985,4986],[9918939,9918940,4986,4987],[9967230,9967231,4987,4988],[9972138,9972139,4988,4989],[9999530,9999531,4989,4990],[10000670,10000671,4990,4991],[10001268,10001269,4991,4992],[10026349,10026350,4992,4993],[10039725,10039726,4993,4994],[10054990,10054991,4994,4995],[10055147,10055148,4995,4996],[10055689,10055690,4996,4997],[10056004,10056005,4997,4998],[10070754,10070755,4998,4999],[10070834,10070835,4999,5000],[10070911,10070912,5000,5001],[10074129,10074130,5001,5002],[10110393,10110394,5002,5003],[10154260,10154261,5003,5004],[10169412,10169413,5004,5005],[10230263,10230264,5005,5006],[10231419,10231420,5006,5007],[10248160,10248161,5007,5008],[10248710,10248711,5008,5009],[10253279,10253280,5009,5010],[10257340,10257341,5010,5011],[10281756,10281757,5011,5012],[10281799,10281800,5012,5013],[10281817,10281818,5013,5014],[10301406,10301407,5014,5015],[10333308,10333309,5015,5016],[10354351,10354352,5016,5017],[10405795,10405796,5017,5018],[10451533,10451534,5018,5019],[10451705,10451706,5019,5020],[10457940,10457941,5020,5021],[10457972,10457973,5021,5022],[10458421,10458422,5022,5023],[10458458,10458459,5023,5024],[10467908,10467909,5024,5025]]'
         run: |
-          python3 scripts/mm_collect.py
+          cat > /tmp/collect_movr.py <<'PYEOF'
+          #!/usr/bin/env python3
+          """movr (moonriver 1285) NG1 corpus collection from a GHA runner (Azure egress).
+          Strategy: 1) sweep candidate RPC endpoints for availability+speed (with archive history checks)
+          2) try trace_filter fast path  3) else bisection on eth_getTransactionCount prefix counts,
+          4) fetch full block bodies, extract txs from NG1.  Prints MVR| lines + writes /tmp/movr_full.jsonl
+          Never broadcasts / never writes chain state.
+          """
+          import json, time, os, sys, traceback
+          import requests
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+
+          NG1 = "0x230a1ac45690b9ae1176389434610b9526d2f21b"
+          NG1L = NG1.lower()
+          LATEST = 10467909          # count(latest)==count(10467909)==5025 (fact335907)
+          TOTAL = 5025
+          GENESIS_BLOCK = 904512     # block holding nonce 0
+          ROUNDS_CAP_SECS = 180
+          FULL_CAP_SECS = 1800       # hard cap for all collection work
+          OUTJSONL = '/tmp/movr_full.jsonl'
+          STATE = '/tmp/movr_state.json'
+
+          FRONTIER = json.loads(os.environ.get('FRONTIER_JSON') or '[]')
+
+          CANDIDATES = [
+              "https://moonriver.public.blastapi.io",
+              "https://moonriver-mainnet.public.blastapi.io",
+              "https://moonriver-rpc.publicnode.com",
+              "https://moonriver.api.onfinality.io/public",
+              "https://rpc.api.moonriver.moonbeam.network",
+              "https://moonriver.unitedbloc.com",
+              "https://moonriver.blockpi.network/v1/rpc/public",
+              "https://moonriver.nodies.app",
+              "https://moonriver.meowrpc.com",
+              "https://moonriver.gateway.tenderly.co",
+              "https://1285.rpc.thirdweb.com",
+              "https://moonriver.rpc.subquery.network/public",
+              "https://moonriver.therpc.io",
+              "https://moonriver.public-rpc.com",
+              "https://moonriver.drpc.org",
+              "https://1rpc.io/movr",
+              "https://moonriver.chainstacklabs.com",
+              "https://moonriver.rpc.caldera.xyz/http",
+              "https://moonriver.api.onfinality.io/ws".replace('/ws', '/public'),
+          ]
+
+          T0 = time.time()
+          def el():
+              return round(time.time() - T0, 1)
+
+          def log(*a):
+              print(f"[{el():7.1f}]", *a, flush=True)
+
+          def rpc(ep, method, params, timeout=20, verify=True):
+              t = time.time()
+              try:
+                  r = requests.post(ep, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                                    timeout=timeout, verify=verify)
+                  try:
+                      j = r.json()
+                  except Exception:
+                      return {'ok': False, 'err': 'non-json http=%s %r' % (r.status_code, r.text[:150]),
+                              'secs': round(time.time() - t, 2)}
+                  return {'ok': 'result' in j, 'res': j.get('result'), 'err': j.get('error'),
+                          'secs': round(time.time() - t, 2), 'http': r.status_code}
+              except Exception as e:
+                  return {'ok': False, 'err': repr(e)[:150], 'secs': round(time.time() - t, 2)}
+
+          def rpc_batch(ep, calls, timeout=200):
+              """calls: list of (method, params). returns (list_of_items_sorted_by_id, secs, err)"""
+              payload = [{"jsonrpc": "2.0", "id": i, "method": m, "params": p} for i, (m, p) in enumerate(calls)]
+              t = time.time()
+              try:
+                  r = requests.post(ep, json=payload, timeout=timeout)
+              except Exception as e:
+                  return None, round(time.time() - t, 2), repr(e)[:160]
+              dt = round(time.time() - t, 2)
+              try:
+                  js = r.json()
+              except Exception:
+                  return None, dt, 'non-json http=%s %r' % (r.status_code, r.text[:160])
+              if not isinstance(js, list):
+                  return None, dt, 'not-list %r' % (str(js)[:160])
+              by = {}
+              for it in js:
+                  if isinstance(it, dict) and 'id' in it:
+                      by[it['id']] = it
+              out = []
+              for i in range(len(calls)):
+                  out.append(by.get(i))
+              return out, dt, None
+
+          # ---------------- phase A: endpoint sweep ----------------
+          def probe_ep(ep):
+              d = {'ep': ep}
+              r1 = rpc(ep, 'eth_chainId', [], timeout=12)
+              d['chainId'] = r1.get('res') if r1['ok'] else r1.get('err')
+              if not r1['ok'] or str(r1.get('res')).lower() not in ('0x505', '1285'):
+                  d['verdict'] = 'BAD_CHAINID'
+                  return d
+              r2 = rpc(ep, 'eth_getTransactionCount', [NG1, 'latest'], timeout=15)
+              d['latest_secs'] = r2['secs']
+              d['latest'] = r2.get('res') if r2['ok'] else r2.get('err')
+              r3 = rpc(ep, 'eth_getTransactionCount', [NG1, hex(964283)], timeout=20)
+              d['hist_secs'] = r3['secs']
+              d['hist'] = r3.get('res') if r3['ok'] else r3.get('err')
+              r4 = rpc(ep, 'eth_getBlockByNumber', [hex(LATEST), False], timeout=25)
+              d['blk_secs'] = r4['secs']
+              d['blk_num'] = (r4.get('res') or {}).get('number') if r4['ok'] else r4.get('err')
+              r5 = rpc(ep, 'trace_filter', [{"fromBlock": hex(964283), "toBlock": hex(964600), "fromAddress": [NG1]}], timeout=25)
+              d['trace_secs'] = r5['secs']
+              d['trace'] = ('list:%d' % len(r5['res'])) if r5['ok'] and isinstance(r5['res'], list) else str(r5.get('err'))[:120]
+              good = (d.get('hist') == '0xdb') and d.get('blk_num') not in (None, '') and str(d.get('blk_num')).lower() == hex(LATEST)
+              d['verdict'] = 'OK' if good else 'BAD_HIST_OR_BLOCK'
+              return d
+
+          def sweep():
+              res = []
+              with ThreadPoolExecutor(max_workers=9) as ex:
+                  futs = {ex.submit(probe_ep, ep): ep for ep in CANDIDATES}
+                  for fu in as_completed(futs):
+                      try:
+                          res.append(fu.result())
+                      except Exception as e:
+                          res.append({'ep': futs[fu], 'verdict': 'EXC', 'err': repr(e)[:120]})
+              for d in res:
+                  log('EP', json.dumps(d)[:400])
+              oks = [d for d in res if d.get('verdict') == 'OK']
+              oks.sort(key=lambda d: (d.get('hist_secs', 99) + d.get('blk_secs', 99)))
+              return res, oks
+
+          # ---------------- phase B: throughput ----------------
+          def measure(ep):
+              out = {}
+              # pick real midpoint blocks from frontier segments
+              mids = []
+              for lo, hi, clo, chi in FRONTIER:
+                  if hi - lo > 2:
+                      mids.append((lo + hi) // 2)
+              mids = sorted(set(mids))
+              step = max(1, len(mids) // 100)
+              sel = mids[::step][:100]
+              for B in (25, 50, 100):
+                  b = sel[:B]
+                  calls = [('eth_getTransactionCount', [NG1, hex(x)]) for x in b]
+                  items, dt, err = rpc_batch(ep, calls, timeout=240)
+                  okn = sum(1 for it in (items or []) if it and 'result' in it)
+                  out['b%d' % B] = {'secs': dt, 'ok': okn, 'n': len(b), 'err': err,
+                                    'per_call_ms': round(1000 * dt / max(1, len(b)), 1)}
+                  log('MEAS', json.dumps({'B': B, **out['b%d' % B]}))
+                  if err or okn < len(b):
+                      break
+              # concurrency test: 4 x b50 in parallel
+              b = sel[:50]
+              calls = [('eth_getTransactionCount', [NG1, hex(x)]) for x in b]
+              t = time.time()
+              with ThreadPoolExecutor(max_workers=4) as ex:
+                  futs = [ex.submit(rpc_batch, ep, calls, 240) for _ in range(4)]
+                  okc = 0
+                  for fu in as_completed(futs):
+                      items, dt, err = fu.result()
+                      okc += sum(1 for it in (items or []) if it and 'result' in it)
+              out['par4_b50'] = {'secs': round(time.time() - t, 2), 'ok': okc, 'n': 200}
+              log('MEAS', json.dumps(out['par4_b50']))
+              return out
+
+          # ---------------- count engine ----------------
+          class Counter:
+              def __init__(self, ep, batch=50, par=4):
+                  self.ep = ep; self.batch = batch; self.par = par
+                  self.queries = 0; self.http = 0; self.fails = 0
+                  self.cache = {}
+
+              def get_many(self, blocks):
+                  need = [b for b in dict.fromkeys(blocks) if b not in self.cache]
+                  if not need:
+                      return {b: self.cache[b] for b in blocks if b in self.cache}
+                  chunks = [need[i:i + self.batch] for i in range(0, len(need), self.batch)]
+                  # one retry pass with halved batch
+                  for attempt in (1, 2, 3):
+                      if not chunks:
+                          break
+                      failed = []
+                      with ThreadPoolExecutor(max_workers=self.par) as ex:
+                          futs = {}
+                          for ch in chunks:
+                              calls = [('eth_getTransactionCount', [NG1, hex(b)]) for b in ch]
+                              fut = ex.submit(rpc_batch, self.ep, calls, 300)
+                              futs[fut] = ch
+                          for fu in as_completed(futs):
+                              ch = futs[fu]
+                              items, dt, err = fu.result()
+                              self.http += 1
+                              self.queries += len(ch)
+                              got = 0
+                              if items:
+                                  for b, it in zip(ch, items):
+                                      if it and 'result' in it:
+                                          try:
+                                              self.cache[b] = int(it['result'], 16)
+                                              got += 1
+                                          except Exception:
+                                              pass
+                              if got < len(ch):
+                                  failed.extend([b for b in ch if b not in self.cache])
+                                  self.fails += 1
+                                  log('CNT_FAIL', 'batch', len(ch), 'got', got, 'dt', dt, 'err', str(err)[:120])
+                      if failed:
+                          self.batch = max(5, self.batch // 2)
+                          chunks = [failed[i:i + self.batch] for i in range(0, len(failed), self.batch)]
+                          time.sleep(1)
+                      else:
+                          chunks = []
+                  return {b: self.cache[b] for b in blocks if b in self.cache}
+
+          def resolve_blocks(ep, deadline):
+              """BFS bisection from FRONTIER -> list of (block, expected_count_in_block)"""
+              counter = Counter(ep)
+              resolved = []
+              active = []
+              for lo, hi, clo, chi in FRONTIER:
+                  active.append([lo, hi, clo, chi])
+              # known: block GENESIS_BLOCK holds nonce 0 (clo=1 at lo of first segment)
+              resolved.append((GENESIS_BLOCK, 1))
+              rnd = 0
+              while active:
+                  rnd += 1
+                  nxt = []       # segments needing split
+                  for seg in active:
+                      lo, hi, clo, chi = seg
+                      L = hi - lo; D = chi - clo
+                      if D <= 0:
+                          continue
+                      if clo is None or chi is None:
+                          nxt.append(seg); continue
+                      if L == 1:
+                          resolved.append((hi, D)); continue
+                      if D == L:
+                          for b in range(lo + 1, hi + 1):
+                              resolved.append((b, 1))
+                          continue
+                      nxt.append(seg)
+                  if not nxt:
+                      break
+                  # compute midpoints for all segments needing split
+                  mids = {}
+                  for lo, hi, clo, chi in nxt:
+                      m = (lo + hi) // 2
+                      mids[m] = None
+                  got = counter.get_many(list(mids.keys()))
+                  newact = []
+                  stall = 0
+                  for lo, hi, clo, chi in nxt:
+                      if lo is None or hi is None:
+                          continue
+                      m = (lo + hi) // 2
+                      cm = got.get(m)
+                      if cm is None:
+                          stall += 1
+                          newact.append([lo, hi, clo, chi])
+                          continue
+                      # sanity: counts must be monotone within bounds
+                      if (clo is not None and cm < clo) or (chi is not None and cm > chi):
+                          log('WARN_NONMONO', lo, hi, clo, chi, m, cm)
+                          newact.append([lo, hi, clo, chi]); continue
+                      newact.append([lo, m, clo, cm])
+                      newact.append([m, hi, cm, chi])
+                  log('RND', rnd, 'segs_in', len(nxt), 'segs_out', len(newact), 'resolved', len(resolved),
+                      'queries', counter.queries, 'http', counter.http, 'fails', counter.fails,
+                      'elapsed', el())
+                  active = [s for s in newact if not (s[0] is not None and s[1] is not None and s[3] - s[2] <= 0)]
+                  if stall and stall == len(nxt):
+                      log('STALL_ABORT', 'all midpoints failed')
+                      break
+                  if time.time() > deadline:
+                      log('DEADLINE_IN_BISECT', 'remaining active segs', len(active))
+                      return resolved, active, counter
+              return resolved, [], counter
+
+          def fetch_blocks(ep, pairs, deadline, batch=25, par=4):
+              """pairs: list of (block, expected_k). returns list of tx dicts for NG1."""
+              txs = []
+              mismatch = []
+              blocks = [p[0] for p in pairs]
+              exp = dict(pairs)
+              chunks = [blocks[i:i + batch] for i in range(0, len(blocks), batch)]
+              done_blocks = 0
+              with ThreadPoolExecutor(max_workers=par) as ex:
+                  futs = {}
+                  for ch in chunks:
+                      calls = [('eth_getBlockByNumber', [hex(b), True]) for b in ch]
+                      futs[ex.submit(rpc_batch, ep, calls, 300)] = ch
+                  order = []
+                  for fu in as_completed(futs):
+                      ch = futs[fu]
+                      items, dt, err = fu.result()
+                      if not items:
+                          log('BLK_FAIL', len(ch), str(err)[:120]); mismatch.append(('blockbatch', ch[:3], str(err)[:80])); continue
+                      for b, it in zip(ch, items):
+                          if not it or 'result' not in it or not it['result']:
+                              mismatch.append((b, 'no block')); continue
+                          blk = it['result']
+                          found = []
+                          for t in (blk.get('transactions') or []):
+                              fr = (t.get('from') or '').lower()
+                              if fr == NG1L:
+                                  found.append(t)
+                          if len(found) != exp.get(b, -1):
+                              mismatch.append((b, 'expected %s got %d' % (exp.get(b), len(found))))
+                          for t in found:
+                              txs.append(extract_tx(t, int(blk['number'], 16), int(blk.get('timestamp', '0x0'), 16)))
+                          done_blocks += 1
+                      if done_blocks % 250 < batch:
+                          log('BLKPROG', done_blocks, '/', len(blocks), 'txs', len(txs), 'elapsed', el())
+                      if time.time() > deadline:
+                          log('DEADLINE_IN_BLOCKS', done_blocks, '/', len(blocks))
+                          break
+              return txs, mismatch, done_blocks
+
+          def extract_tx(t, block, ts):
+              def h2i(x):
+                  if x is None: return None
+                  return int(x, 16) if isinstance(x, str) else int(x)
+              cid = t.get('chainId')
+              return {
+                  'block': block, 'ts': ts, 'hash': t.get('hash'), 'nonce': h2i(t.get('nonce')),
+                  'r': t.get('r'), 's': t.get('s'), 'v': t.get('v'), 'chainId': h2i(cid),
+                  'type': t.get('type'), 'gasPrice': t.get('gasPrice'), 'maxFeePerGas': t.get('maxFeePerGas'),
+                  'maxPriorityFeePerGas': t.get('maxPriorityFeePerGas'), 'gas': t.get('gas'),
+                  'to': t.get('to'), 'value': t.get('value'), 'input': t.get('input'),
+                  'from': t.get('from'),
+              }
+
+          def main():
+              log('START egress', requests.get('https://api.ipify.org', timeout=10).text.strip() if True else '?')
+              if len(FRONTIER) < 10:
+                  log('FATAL no frontier'); return
+              res, oks = sweep()
+              json.dump(res, open('/tmp/ep_sweep.json', 'w'), indent=1)
+              if not oks:
+                  log('NO_ENDPOINT_OK'); return
+              best = oks[0]['ep']
+              log('BEST', best, json.dumps(oks[0])[:300])
+              # canary on best endpoint: block 10467909 must hold nonce 5024, block 904512 nonce 0
+              can = {}
+              for b, want in ((LATEST, 5024), (GENESIS_BLOCK, 0)):
+                  r = rpc(best, 'eth_getBlockByNumber', [hex(b), True], timeout=40)
+                  blk = r.get('res') or {}
+                  found = [t for t in (blk.get('transactions') or []) if (t.get('from') or '').lower() == NG1L]
+                  can[str(b)] = {'n': len(found), 'nonces': [int(t['nonce'], 16) for t in found], 'secs': r['secs'], 'err': (r.get('err') or '')}
+                  log('CANARY', b, json.dumps(can[str(b)])[:200])
+              ok_canary = all((can[str(b)]['n'] >= 1 and want in can[str(b)]['nonces']) for b, want in ((LATEST, 5024), (GENESIS_BLOCK, 0)))
+              log('CANARY_VERDICT', ok_canary)
+
+              meas = measure(best)
+              json.dump({'sweep': res, 'best': best, 'canary': can, 'canary_ok': ok_canary, 'meas': meas},
+                        open('/tmp/movr_phase_ab.json', 'w'), indent=1)
+
+              deadline_all = T0 + FULL_CAP_SECS
+              # ---- fast path: trace_filter over full range
+              txs = []
+              mode = 'none'
+              trace_supported = str(oks[0].get('trace', '')).startswith('list:')
+              log('TRACE_SUPPORTED_ON_BEST', trace_supported, oks[0].get('trace'))
+              tr = {'ok': False, 'res': None, 'err': 'skipped(not supported by probe)'}
+              hashes = []
+              if trace_supported:
+                  tr = rpc(best, 'trace_filter', [{"fromBlock": hex(GENESIS_BLOCK), "toBlock": hex(LATEST), "fromAddress": [NG1]}], timeout=150)
+                  log('TRACE_FULL secs', tr.get('secs'), 'ok', tr.get('ok'), 'n', (len(tr['res']) if isinstance(tr.get('res'), list) else None), 'err', str(tr.get('err'))[:150])
+              if tr['ok'] and isinstance(tr['res'], list) and len(tr['res']) >= TOTAL * 0.9:
+                  seen = set()
+                  for trc in tr['res']:
+                      if (trc.get('action') or {}).get('from', '').lower() == NG1L:
+                          hh = (trc.get('transactionHash') or '').lower()
+                          if hh and hh not in seen:
+                              seen.add(hh); hashes.append(hh)
+                  log('TRACE_FILTER hits', len(hashes), 'secs', tr['secs'])
+                  # fetch tx bodies
+                  got = []
+                  for i in range(0, len(hashes), 50):
+                      ch = hashes[i:i + 50]
+                      calls = [('eth_getTransactionByHash', [h]) for h in ch]
+                      items, dt, err = rpc_batch(best, calls, 300)
+                      if items:
+                          for it in items:
+                              if it and it.get('result'):
+                                  t = it['result']
+                                  got.append(t)
+                      if time.time() > deadline_all:
+                          log('DEADLINE_IN_TXFETCH', len(got)); break
+                      if i % 1000 == 0:
+                          log('TXP', i, '/', len(hashes), 'got', len(got), 'elapsed', el())
+                  # block numbers come from trace result
+                  bh = {}
+                  for trc in tr['res']:
+                      hh = (trc.get('transactionHash') or '').lower()
+                      if hh: bh[hh] = int(trc.get('blockNumber', '0x0'), 16)
+                  for t in got:
+                      hh = (t.get('hash') or '').lower()
+                      txs.append(extract_tx(t, bh.get(hh, 0), 0))
+                  mode = 'trace_filter'
+              else:
+                  log('TRACE_FILTER unavailable/insufficient', str(tr.get('err'))[:150], 'secs', tr['secs'])
+
+              if not txs:
+                  mode = 'bisect'
+                  # allocate: bisect at most until 55% of remaining wall budget
+                  dbg = time.time() + (deadline_all - time.time()) * 0.55
+                  resolved, leftover, counter = resolve_blocks(best, dbg)
+                  log('BISECT_DONE resolved_blocks', len(resolved), 'leftover_segs', len(leftover),
+                      'queries', counter.queries, 'http', counter.http, 'fails', counter.fails)
+                  json.dump({'resolved_n': len(resolved), 'leftover': leftover,
+                             'queries': counter.queries, 'fails': counter.fails}, open('/tmp/bisect_state.json', 'w'))
+                  txs, mismatch, done_blocks = fetch_blocks(best, resolved, deadline_all, batch=25, par=4)
+                  log('BLOCKS_DONE', done_blocks, '/', len(resolved), 'txs', len(txs), 'mismatch', len(mismatch))
+                  json.dump(mismatch[:200], open('/tmp/blk_mismatch.json', 'w'), indent=1)
+
+              # dedupe by (chain,hash,nonce)
+              seen = set(); uniq = []
+              for t in txs:
+                  k = (t.get('chainId'), (t.get('hash') or '').lower(), t.get('nonce'))
+                  if k in seen: continue
+                  seen.add(k); uniq.append(t)
+              with open(OUTJSONL, 'w') as f:
+                  for t in sorted(uniq, key=lambda x: (x.get('nonce') if x.get('nonce') is not None else -1)):
+                      f.write(json.dumps(t, separators=(',', ':')) + '\n')
+              nonces = sorted(t['nonce'] for t in uniq if t.get('nonce') is not None)
+              miss = [n for n in range(TOTAL) if n not in set(nonces)]
+              log('RESULT mode', mode, 'txs', len(uniq), 'distinct_hash', len({t['hash'] for t in uniq}),
+                  'nonce_min', (nonces[0] if nonces else None), 'nonce_max', (nonces[-1] if nonces else None),
+                  'missing_nonces', len(miss))
+              log('MISSING_SAMPLE', miss[:40])
+              for t in uniq:
+                  print('MVR|%d|%s|%s|%s|%s|%s|%s|%s' % (t['block'], t['nonce'], t['hash'], t['r'], t['s'], t['v'],
+                                                         t['chainId'], t['type']), flush=True)
+              json.dump({'mode': mode, 'txs': len(uniq), 'distinct_hash': len({t['hash'] for t in uniq}),
+                         'missing': miss[:200], 'missing_n': len(miss), 'elapsed': el()},
+                        open(STATE, 'w'), indent=1)
+              log('DONE', json.dumps(json.load(open(STATE)))[:400])
+
+          if __name__ == '__main__':
+              try:
+                  main()
+              except Exception:
+                  traceback.print_exc()
+                  log('FATAL_EXC')
+          PYEOF
+          python3 -u /tmp/collect_movr.py
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: movr
+          path: |
+            /tmp/movr_full.jsonl
+            /tmp/movr_state.json
+            /tmp/ep_sweep.json
+            /tmp/movr_phase_ab.json
+            /tmp/blk_mismatch.json
+            /tmp/bisect_state.json
+          if-no-files-found: warn
