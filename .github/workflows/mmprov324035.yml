@@ -1,0 +1,116 @@
+name: mmprov324035
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prov:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: probe
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error
+
+          NG = '0x230a1ac45690b9ae1176389434610b9526d2f21b'
+          BR = {'moonbeam':'0x84A420459cd31C3c34583F67E0f0fB191067D32f',
+                'moonriver':'0xaeD5b25BE1c3163c907a471082640450F928DDFE'}
+          P = {
+           'moonbeam': ['https://rpc.api.moonbeam.network',
+                        'https://moonbeam.api.onfinality.io/public',
+                        'https://moonbeam-rpc.publicnode.com',
+                        'https://moonbeam-rpc.dwellir.com',
+                        'https://moonbeam.nodies.app',
+                        'https://1rpc.io/glmr',
+                        'https://rpc.ankr.com/moonbeam',
+                        'https://moonbeam.public.blastapi.io',
+                        'https://endpoints.omniatech.io/v1/glmr/mainnet/public',
+                        'https://moonbeam.drpc.org',
+                        'https://moonbeam-mainnet.public.blastapi.io'],
+           'moonriver':['https://rpc.api.moonriver.moonbeam.network',
+                        'https://moonriver.api.onfinality.io/public',
+                        'https://moonriver-rpc.publicnode.com',
+                        'https://moonriver-rpc.dwellir.com',
+                        'https://moonriver.nodies.app',
+                        'https://1rpc.io/movr',
+                        'https://rpc.ankr.com/moonriver',
+                        'https://moonriver.public.blastapi.io',
+                        'https://endpoints.omniatech.io/v1/movr/mainnet/public',
+                        'https://moonriver.drpc.org',
+                        'https://moonriver-mainnet.public.blastapi.io'],
+          }
+
+          def post(url, payload, timeout=25):
+              data = json.dumps(payload).encode()
+              req = urllib.request.Request(url, data=data,
+                  headers={'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+              t0=time.time()
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as r:
+                      return r.status, r.read(), round(time.time()-t0,2)
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()[:300], round(time.time()-t0,2)
+              except Exception as e:
+                  return 0, str(e).encode()[:200], round(time.time()-t0,2)
+
+          def rpc(url, method, params, timeout=25):
+              st, body, dt = post(url, {'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout)
+              try: j=json.loads(body)
+              except Exception: return dt, st, None, body[:160].decode('utf-8','replace')
+              if isinstance(j,dict) and j.get('error'):
+                  return dt, st, None, str(j['error'])[:160]
+              return dt, st, (len(j['result']) if isinstance(j.get('result'),list) else j.get('result')), ''
+
+          for ch, urls in P.items():
+              br = BR[ch]
+              print('#####', ch, flush=True)
+              for u in urls:
+                  dt, st, res, err = rpc(u, 'eth_blockNumber', [], 15)
+                  head = res if isinstance(res, str) else None
+                  print('PROV|%s|%s|bn_dt=%s|st=%s|head=%s|%s' % (ch, u, dt, st, head, err), flush=True)
+                  if not head:
+                      continue
+                  hi = int(head, 16)
+                  # logs range caps at recent region
+                  for rng in (1024, 10240, 100000):
+                      d2, s2, n2, e2 = rpc(u, 'eth_getLogs', [{'address':br,
+                          'fromBlock':hex(hi-rng), 'toBlock':hex(hi-1)}], 30)
+                      print('LOGS|%s|%s|rng=%d|dt=%s|st=%s|n=%s|%s' % (ch, u, rng, d2, s2, n2, e2), flush=True)
+                      if n2 is None and ('too wide' in str(e2) or 'exceed' in str(e2).lower() or 'limit' in str(e2).lower()):
+                          break
+                  # trace_filter small + wide
+                  d3,s3,n3,e3 = rpc(u,'trace_filter',[{'fromBlock':hex(hi-1023),'toBlock':hex(hi-1),'fromAddress':[NG]}],30)
+                  print('TRACE|%s|%s|dt=%s|st=%s|n=%s|%s' % (ch,u,d3,s3,n3,e3), flush=True)
+                  # batch support test
+                  batch=[{'jsonrpc':'2.0','id':i,'method':'eth_getTransactionCount','params':[NG,hex(hi-2000-i*7)]} for i in range(50)]
+                  d4,s4,b4 = post(u, batch, 30)
+                  okcnt=0
+                  try:
+                      jl=json.loads(b4)
+                      okcnt=sum(1 for x in jl if isinstance(x,dict) and x.get('result'))
+                  except Exception: pass
+                  print('BATCH|%s|%s|dt=%s|st=%s|ok=%d|%s' % (ch,u,d4,s4,okcnt, b4[:100].decode('utf-8','replace')), flush=True)
+
+          print('##### explorers', flush=True)
+          def get(url, timeout=30):
+              req=urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0'})
+              t0=time.time()
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as r:
+                      return r.status, r.read()[:600], round(time.time()-t0,2)
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()[:400], round(time.time()-t0,2)
+              except Exception as e:
+                  return 0, str(e).encode()[:200], round(time.time()-t0,2)
+          for u in ['https://api-moonbeam.moonscan.io/api','https://api-moonriver.moonscan.io/api',
+                    'https://moonbeam.moonscan.io/api','https://moonriver.moonscan.io/api',
+                    'https://moonbeam.blockscout.com/api/v2/addresses/%s/transactions?filter=from' % NG,
+                    'https://moonriver.blockscout.com/api/v2/addresses/%s/transactions?filter=from' % NG]:
+              st, body, dt = get(u)
+              print('EXP|%s|st=%s|dt=%s|%s' % (u, st, dt, body[:250].decode('utf-8','replace').replace('\n',' ')), flush=True)
+          # etherscan v2 chainlist
+          st, body, dt = get('https://api.etherscan.io/v2/chainlist')
+          print('EXP|chainlist|st=%s|n=%d|has1284=%s|has1285=%s' % (st, len(body), b'1284' in body, b'1285' in body), flush=True)
+          print('DONE', flush=True)
+          PY
